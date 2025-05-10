@@ -1,0 +1,38 @@
+data:
+  test_dir: "data/processed/test"
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+model:
+  checkpoint_path: "checkpoints/best_model.pth"
+  device: "cuda"  # Options: "cuda", "cpu"
+
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1_score"
+    - "auc_roc"
+    - "confusion_matrix"
+  
+  visualization:
+    enabled: true
+    num_samples: 10
+    save_dir: "evaluation_results"
+    plot_types:
+      - "confusion_matrix"
+      - "roc_curve"
+      - "precision_recall_curve"
+      - "error_analysis"
+
+  error_analysis:
+    enabled: true
+    save_misclassified: true
+    confidence_threshold: 0.8
+
+output:
+  format: "json"
+  save_dir: "evaluation_results"
+  detailed_report: true 

@@ -1,0 +1,48 @@
+data:
+  train_dir: "data/processed/train"
+  val_dir: "data/processed/val"
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+model:
+  name: "efficientnet_b0"  # Options: "efficientnet_b0", "resnet50", "custom"
+  pretrained: true
+  num_classes: 2
+  dropout_rate: 0.2
+
+training:
+  epochs: 100
+  early_stopping:
+    patience: 10
+    min_delta: 0.001
+  optimizer:
+    name: "adam"  # Options: "adam", "sgd"
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    momentum: 0.9  # For SGD
+  scheduler:
+    name: "cosine"  # Options: "cosine", "step", "plateau"
+    warmup_epochs: 5
+    min_lr: 0.00001
+
+loss:
+  name: "cross_entropy"  # Options: "cross_entropy", "focal"
+  focal_gamma: 2.0  # For focal loss
+
+logging:
+  log_dir: "logs"
+  tensorboard: true
+  save_frequency: 5  # Save checkpoint every N epochs
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1_score"
+    - "auc_roc"
+
+checkpointing:
+  dir: "checkpoints"
+  save_best_only: true
+  monitor: "val_f1_score"
+  mode: "max" 
