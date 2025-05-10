@@ -173,6 +173,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# idea
+.idea
+
 # Data files
 data/raw/
 data/processed/
