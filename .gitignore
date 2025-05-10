@@ -174,4 +174,6 @@ cython_debug/
 .pypirc
 
 # Data files
-data/
+data/raw/
+data/processed/
+
