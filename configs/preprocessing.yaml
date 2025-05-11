@@ -13,7 +13,7 @@ preprocessing:
     min_frames: 10
 
   face_detection:
-    detector: "dlib"  # Options: "dlib", "opencv"
+    detector: "opencv"  # Options: "dlib", "opencv"
     min_face_size: 100
     margin: 0.2  # Margin around detected face as percentage of face size
 
@@ -36,6 +36,7 @@ preprocessing:
     hop_length: 512
 
 output:
-  format: "hdf5"  # Options: "hdf5", "numpy", "torch"
+  format: "numpy"  # Options: "hdf5", "numpy", "torch"
+  batch_size: 100
   compression: "gzip"
   compression_level: 9 

@@ -1,13 +1,14 @@
-from typing import Dict, Any, List, Tuple
+import json
 import os
+from typing import Dict, Any, List, Tuple
+
 import cv2
+# import face_alignment
+import h5py
 import numpy as np
 import torch
-import face_alignment
 from tqdm import tqdm
-import h5py
-import json
-from pathlib import Path
+
 
 class DataPreprocessor:
     """Class for preprocessing deepfake detection data."""
@@ -24,13 +25,13 @@ class DataPreprocessor:
     def _initialize_face_detector(self):
         """Initialize face detector based on configuration."""
         detector_type = self.config["preprocessing"]["face_detection"]["detector"]
-        if detector_type == "dlib":
-            return face_alignment.FaceAlignment(
-                face_alignment.LandmarksType._2D,
-                flip_input=False,
-                device="cuda" if torch.cuda.is_available() else "cpu"
-            )
-        elif detector_type == "opencv":
+        # if detector_type == "dlib":
+        #     return face_alignment.FaceAlignment(
+        #         face_alignment.LandmarksType._2D,
+        #         flip_input=False,
+        #         device="cuda" if torch.cuda.is_available() else "cpu"
+        #     )
+        if detector_type == "opencv":
             return cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         else:
             raise ValueError(f"Unsupported face detector: {detector_type}")
