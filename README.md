@@ -19,17 +19,17 @@ pip install -r requirements.txt
 
 ### Data Preprocessing
 ```bash
-python preprocess.py --config configs/preprocessing.yaml
+python preprocess.py --dataset fakeavceleb
 ```
 
 ### Training
 ```bash
-python train.py --config configs/training.yaml
+python train.py
 ```
 
 ### Evaluation
 ```bash
-python evaluate.py --config configs/evaluation.yaml
+python evaluate.py
 ```
 
 ## Configuration

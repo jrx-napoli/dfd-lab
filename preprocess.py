@@ -22,7 +22,7 @@ def main():
     args = parse_args()
 
     # Load configuration
-    with open("configs\\preprocessing.yaml", "r") as f:
+    with open("configs/preprocessing.yaml", "r") as f:
         config = yaml.safe_load(f)
 
     input_dir = config["data"]["input_dir"]
