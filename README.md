@@ -4,15 +4,17 @@ A modular platform for training, evaluating, and comparing deepfake detectors ac
 
 ## Setup
 
-1. Create a virtual environment:
+We recommend using [`uv`](https://github.com/astral-sh/uv) to manage this Python project. 
+Simply run the following in root directory:
+
+1. Run a script
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv run preprocess.py --dataset fakeavceleb
 ```
 
-2. Install dependencies:
+2. Update projects environment
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Usage
