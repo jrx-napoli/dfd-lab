@@ -40,7 +40,8 @@ def load_model(config: dict, checkpoint_path: str) -> BaseDetector:
     # Create model
     model_name = config["model"]["name"]
     num_classes = config["model"]["num_classes"]
-    
+    device = config["model"]["device"]
+    #TODO: Change this to use the model factory
     if model_name == "efficientnet_b0":
         from torchvision.models import efficientnet_b0
         model = efficientnet_b0(pretrained=False)
@@ -53,7 +54,7 @@ def load_model(config: dict, checkpoint_path: str) -> BaseDetector:
         raise ValueError(f"Unsupported model: {model_name}")
     
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     
     return model
@@ -93,7 +94,6 @@ def main():
     # Load model
     print("Loading model...")
     model = load_model(config, args.checkpoint)
-    model = model.to(device)
     model.eval()
     
     # Create data loader
@@ -117,9 +117,20 @@ def main():
     # Compute metrics
     metrics = metrics_calculator.compute()
     print("\nEvaluation metrics:")
+    
+    # Print all metrics except confusion matrix and classification report
     for metric, value in metrics.items():
-        if metric != "confusion_matrix":
+        if metric not in ["confusion_matrix", "classification_report"]:
             print(f"{metric}: {value:.4f}")
+    
+    # Confusion matrix
+    if "confusion_matrix" in metrics:
+        print("\n=== Confusion Matrix ===")
+        cm = metrics["confusion_matrix"]
+        print("          Predicted")
+        print("           Real  Fake")
+        print(f"Actual Real  {cm[0][0]:4d}  {cm[0][1]:4d}")
+        print(f"       Fake  {cm[1][0]:4d}  {cm[1][1]:4d}")
     
     # Generate visualizations
     if config["evaluation"]["visualization"]["enabled"]:
@@ -129,8 +140,24 @@ def main():
     # Perform error analysis
     if config["evaluation"]["error_analysis"]["enabled"]:
         print("\nPerforming error analysis...")
-        misclassified = metrics_calculator.analyze_errors(test_loader, model, device)
+        misclassified, error_summary = metrics_calculator.analyze_errors(test_loader, model, device)
         print(f"Found {len(misclassified)} misclassified samples")
+        
+        # Print error analysis summary
+        if error_summary:
+            print("\n=== Error Analysis Summary ===")
+            print(f"Total errors: {error_summary['total_errors']}")
+            print(f"False positives: {error_summary['false_positives_count']}")
+            print(f"False negatives: {error_summary['false_negatives_count']}")
+            print(f"High confidence errors: {error_summary['high_confidence_errors_count']}")
+            print(f"Low confidence errors: {error_summary['low_confidence_errors_count']}")
+            print(f"Average error confidence: {error_summary['avg_confidence_errors']:.4f}")
+            print(f"Average confidence gap: {error_summary['avg_confidence_gap']:.4f}")
+            
+            if error_summary['most_confident_error']:
+                print(f"Most confident error: {error_summary['most_confident_error']['confidence']:.4f}")
+            if error_summary['least_confident_error']:
+                print(f"Least confident error: {error_summary['least_confident_error']['confidence']:.4f}")
     
     print("\nEvaluation completed!")
 
