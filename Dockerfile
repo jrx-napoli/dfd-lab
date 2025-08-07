@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Install uv
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir uv
