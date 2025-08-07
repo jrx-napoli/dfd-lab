@@ -1,0 +1,50 @@
+data/raw/
+data/processed/
+*.csv
+*.tsv
+*.zip
+*.tar.gz
+*.hdf5
+*.npy
+*.npz
+
+# Ignore notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environment folders
+venv/
+.env/
+env/
+.venv/
+
+# Ignore model weights and logs
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.onnx
+logs/
+runs/
+
+# Ignore config and secrets
+*.env
+
+# Ignore OS and IDE clutter
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+
+# Ignore version control and build files
+.git/
+.gitignore
+*.egg-info/
+dist/
+build/
