@@ -131,13 +131,16 @@ class XceptionMaxFusionDetector(BaseDetector):
         audio_logits = self.audio_model(audio_reshaped)
         
         # Apply max fusion across modalities and frames in one operation
-        fused_logits = torch.max(video_logits, audio_logits)
-        final_logits = torch.max(fused_logits, dim=1)[0] 
+        fused_logits_per_frame = torch.max(video_logits, audio_logits)
+        # Reshape back to (batch_size, num_frames, num_classes)
+        fused_logits_reshaped = fused_logits_per_frame.view(batch_size, num_frames, -1)
+        # Take max across frames for each video
+        final_logits, _ = torch.max(fused_logits_reshaped, dim=1) 
             
         return final_logits
 
 
-    def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> int:
+    def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
         """Get model predictions (single class) for multi-modal input.
         
         Args:
@@ -145,13 +148,13 @@ class XceptionMaxFusionDetector(BaseDetector):
             audio_input: Input tensor of shape (batch_size, num_frames, channels, height, width) 
             
         Returns:
-            Predicted class (0 or 1) - the class with maximum probability
+            Tensor of predicted classes (0 or 1) - one prediction per video in the batch
         """
         self.eval()
         with torch.no_grad():
             probabilities = torch.softmax(self.forward(image_input, audio_input), dim=1)
             predictions = torch.argmax(probabilities, dim=1)
-            return predictions.item()  # Convert tensor to Python int
+            return predictions  # Return tensor directly
     
     
     def get_confidence(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:

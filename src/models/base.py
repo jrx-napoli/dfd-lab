@@ -48,7 +48,7 @@ class BaseDetector(nn.Module, ABC):
         pass
     
     @abstractmethod
-    def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> int:
+    def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
         """Get model predictions for multi-modal input.
         
         Args:
@@ -56,7 +56,7 @@ class BaseDetector(nn.Module, ABC):
             audio_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
             
         Returns:
-            Predicted class (0 or 1) - the class with maximum probability
+            Tensor of predicted classes (0 or 1) - one prediction per video in the batch
         """
         pass
     
