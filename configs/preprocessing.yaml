@@ -36,7 +36,14 @@ preprocessing:
     hop_length: 512
 
 output:
-  format: "numpy"  # Options: "hdf5", "numpy", "torch"
+  format: "lmdb"  # Options: "hdf5", "numpy", "torch", "lmdb"
   batch_size: 100
   compression: "gzip"
-  compression_level: 9 
+  compression_level: 9
+  
+  # LMDB-specific configuration
+  lmdb:
+    map_size_gb: 10  # Maximum database size in GB
+    max_readers: 1024
+    create_indexes: true  # Whether to create indexes for efficient querying
+    index_fields: ["label", "category", "method"]  # Fields to index 

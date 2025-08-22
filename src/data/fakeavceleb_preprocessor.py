@@ -6,6 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.data.base_preprocessor import DataPreprocessor
+from src.data.lmdb_storage import LMDBStorage
 
 
 class FakeAVCelebPreprocessor(DataPreprocessor):
@@ -168,6 +169,13 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             import torch
             self.torch_data = []
             self.torch_index = 0
+        elif output_format == "lmdb":
+            # Initialize LMDB storage
+            lmdb_path = os.path.join(output_dir, 'processed_data.lmdb')
+            map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
+            self.lmdb_storage = LMDBStorage(lmdb_path, map_size=map_size)
+            self.lmdb_storage.open()
+            self.lmdb_index = 0
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -202,6 +210,12 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             if len(self.torch_data) >= self.config["output"]["batch_size"]:
                 self._save_torch_batch(output_dir)
 
+        elif output_format == "lmdb":
+            # Save data to LMDB
+            key = f'sample_{self.lmdb_index:06d}'
+            self.lmdb_storage.store_sample(key, result)
+            self.lmdb_index += 1
+
     def _finalize_output_storage(self, output_dir: str, output_format: str):
         """Finalize storage and save any remaining data.
         
@@ -217,6 +231,8 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
         elif output_format == "torch":
             if self.torch_data:  # Save any remaining data
                 self._save_torch_batch(output_dir)
+        elif output_format == "lmdb":
+            self.lmdb_storage.close()
 
     def _save_numpy_batch(self, output_dir: str):
         """Save a batch of numpy data.

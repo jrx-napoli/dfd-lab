@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from src.data.lmdb_storage import LMDBStorage
+
 
 class DataPreprocessor:
     """Class for preprocessing deepfake detection data."""
@@ -208,6 +210,8 @@ class DataPreprocessor:
             self._save_numpy(processed_data, output_dir)
         elif output_format == "torch":
             self._save_torch(processed_data, output_dir)
+        elif output_format == "lmdb":
+            self._save_lmdb(processed_data, output_dir)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
     
@@ -265,3 +269,66 @@ class DataPreprocessor:
                     torch.from_numpy(item["data"]),
                     os.path.join(split_dir, f"{item['label']}_{i}.pt")
                 ) 
+    
+    def _save_lmdb(self, data: List[Dict[str, Any]], output_dir: str):
+        """Save processed data in LMDB format."""
+        for split in ["train", "val", "test"]:
+            split_data = [d for d in data if d["metadata"]["video_path"].split(os.sep)[-2] == split]
+            if not split_data:
+                continue
+                
+            split_output_dir = os.path.join(output_dir, split)
+            os.makedirs(split_output_dir, exist_ok=True)
+            
+            # Initialize LMDB storage
+            lmdb_path = os.path.join(split_output_dir, "data.lmdb")
+            map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
+            
+            with LMDBStorage(lmdb_path, map_size=map_size) as storage:
+                print(f"Saving {len(split_data)} samples to {lmdb_path}")
+                
+                # Store samples with progress bar
+                for i, item in enumerate(tqdm(split_data, desc=f"Saving {split} to LMDB")):
+                    # Create unique key for the sample
+                    key = f"sample_{i:06d}"
+                    
+                    # Store the sample
+                    storage.store_sample(key, item)
+                
+                # Create indexes if configured
+                if self.config["output"]["lmdb"]["create_indexes"]:
+                    print(f"Creating indexes for {split} split...")
+                    self._create_lmdb_indexes(storage, split_data)
+                
+                # Save metadata separately for easy access
+                metadata = {f"sample_{i:06d}": item["metadata"] for i, item in enumerate(split_data)}
+                metadata_path = os.path.join(split_output_dir, "metadata.json")
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata, f, indent=2)
+                
+                # Print dataset info
+                info = storage.get_dataset_info()
+                print(f"LMDB info for {split}: {info['total_samples']} samples")
+    
+    def _create_lmdb_indexes(self, storage: LMDBStorage, data: List[Dict[str, Any]]):
+        """Create indexes for efficient querying in LMDB."""
+        index_fields = self.config["output"]["lmdb"]["index_fields"]
+        
+        for field in index_fields:
+            if field == "label":
+                # Create label index
+                def label_index_func(sample):
+                    return sample.get("label", "unknown")
+                storage.create_index("label_index", label_index_func)
+                
+            elif field == "category":
+                # Create category index
+                def category_index_func(sample):
+                    return sample.get("metadata", {}).get("category", "unknown")
+                storage.create_index("category_index", category_index_func)
+                
+            elif field == "method":
+                # Create method index
+                def method_index_func(sample):
+                    return sample.get("metadata", {}).get("method", "unknown")
+                storage.create_index("method_index", method_index_func) 
