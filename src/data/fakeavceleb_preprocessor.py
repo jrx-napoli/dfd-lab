@@ -142,8 +142,30 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                         stats['total_samples'] += 1
 
                 except Exception as e:
-                    print(f"\nError processing {video_path}: {str(e)}")
-                    continue
+                    # Check if this is our MDB_MAP_FULL error that should stop processing
+                    if "MDB_MAP_FULL" in str(e) or "Environment mapsize limit reached" in str(e):
+                        error_msg = (
+                            f"\n\n{'=' * 64}\n"
+                            f"ERROR: LMDB storage limit reached!\n"
+                            f"{'=' * 64}\n"
+                            f"The LMDB database has reached its maximum size limit.\n"
+                            f"Current map size: {self.lmdb_storage.map_size / (1024 ** 3):.1f} GB\n"
+                            f"Processed samples: {self.lmdb_index}\n"
+                            # f"Last attempted sample: {key}\n\n"
+                            f"To continue processing, please:\n"
+                            f"1. Increase the 'map_size_gb' value in your configuration file\n"
+                            f"2. Restart the preprocessing with a larger map size\n"
+                            f"{'=' * 64}\n"
+                        )
+                        print(error_msg)
+
+                        # Close the storage cleanly
+                        self.lmdb_storage.close()
+                        return
+                    else:
+                        # Other errors - log and continue with next video
+                        print(f"\nError processing {video_path}: {str(e)}")
+                        continue
 
         # Finalize output storage
         self._finalize_output_storage(output_dir, output_format)
