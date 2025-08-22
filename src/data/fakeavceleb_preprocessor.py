@@ -3,10 +3,12 @@ import os
 from typing import Dict, Any, List, Tuple
 
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 
 from src.data.base_preprocessor import DataPreprocessor
 from src.data.lmdb_storage import LMDBStorage
+from src.data.shard_writer import ShardWriter
 
 
 class FakeAVCelebPreprocessor(DataPreprocessor):
@@ -105,6 +107,8 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
 
         # Initialize output format specific storage
         output_format = self.config["output"]["format"]
+        # Generic counter for processed items (videos). Used for IDs/logging across formats
+        self.sample_index = 0
         self._initialize_output_storage(output_dir, output_format)
 
         # Process each category
@@ -150,7 +154,7 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                             f"{'=' * 64}\n"
                             f"The LMDB database has reached its maximum size limit.\n"
                             f"Current map size: {self.lmdb_storage.map_size / (1024 ** 3):.1f} GB\n"
-                            f"Processed samples: {self.lmdb_index}\n"
+                            f"Processed samples: {getattr(self, 'sample_index', getattr(self, 'lmdb_index', 0))}\n"
                             # f"Last attempted sample: {key}\n\n"
                             f"To continue processing, please:\n"
                             f"1. Increase the 'map_size_gb' value in your configuration file\n"
@@ -195,9 +199,27 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             # Initialize LMDB storage
             lmdb_path = os.path.join(output_dir, 'processed_data.lmdb')
             map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
-            self.lmdb_storage = LMDBStorage(lmdb_path, map_size=map_size)
+            compression = self.config["output"].get("lmdb", {}).get("compression")
+            compression_level = self.config["output"].get("lmdb", {}).get("compression_level", 0)
+            self.lmdb_storage = LMDBStorage(
+                lmdb_path,
+                map_size=map_size,
+                compression=compression,
+                compression_level=compression_level,
+            )
             self.lmdb_storage.open()
             self.lmdb_index = 0
+        elif output_format == "webdataset":
+            wds_cfg = self.config["output"]["webdataset"]
+            shard_dir = os.path.join(output_dir, 'shards')
+            self.shard_writer = ShardWriter(
+                output_dir=shard_dir,
+                shard_prefix=wds_cfg.get("prefix", "shard"),
+                max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
+                image_codec=wds_cfg.get("image_codec", "webp"),
+                image_quality=int(wds_cfg.get("image_quality", 90)),
+                index_filename=wds_cfg.get("index_filename", "index.csv"),
+            )
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -237,6 +259,23 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             key = f'sample_{self.lmdb_index:06d}'
             self.lmdb_storage.store_sample(key, result)
             self.lmdb_index += 1
+            self.sample_index += 1
+        elif output_format == "webdataset":
+            # Save as a clip sample
+            clip_len = int(self.config["output"]["webdataset"].get("clip_length", 16))
+            clip_stride = int(self.config["output"]["webdataset"].get("clip_stride", clip_len))
+            frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
+            label = int(result["label"])
+            meta = result["metadata"].copy()
+            # Create clips
+            t = frames.shape[0]
+            start = 0
+            while start + clip_len <= t:
+                clip = frames[start:start + clip_len]
+                sample_id = f"{self.sample_index:06d}_{start:06d}"
+                self.shard_writer.add_sample(sample_id, clip, label, meta)
+                start += clip_stride
+            self.sample_index += 1
 
     def _finalize_output_storage(self, output_dir: str, output_format: str):
         """Finalize storage and save any remaining data.
@@ -255,6 +294,8 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                 self._save_torch_batch(output_dir)
         elif output_format == "lmdb":
             self.lmdb_storage.close()
+        elif output_format == "webdataset":
+            self.shard_writer.close()
 
     def _save_numpy_batch(self, output_dir: str):
         """Save a batch of numpy data.

@@ -36,14 +36,26 @@ preprocessing:
     hop_length: 512
 
 output:
-  format: "lmdb"  # Options: "hdf5", "numpy", "torch", "lmdb"
+  format: "webdataset"  # Options: "hdf5", "numpy", "torch", "lmdb", "webdataset"
   batch_size: 100
-  compression: "gzip"
-  compression_level: 9
+  compression: "zstd"  # default for HDF5/numpy saving if used
+  compression_level: 10
   
   # LMDB-specific configuration
   lmdb:
-    map_size_gb: 10  # Maximum database size in GB
+    map_size_gb: 6  # Maximum database size in GB
     max_readers: 1024
     create_indexes: true  # Whether to create indexes for efficient querying
-    index_fields: ["label", "category", "method"]  # Fields to index 
+    index_fields: ["label", "category", "method"]  # Fields to index
+    compression: "zstd"  # Options: "zstd", "zlib", null
+    compression_level: 10
+
+  # WebDataset-specific configuration
+  webdataset:
+    prefix: "shard"
+    max_shard_size_mb: 1024
+    image_codec: "webp"     # "webp" or "jpeg"
+    image_quality: 90        # 1..100
+    index_filename: "index.csv"
+    clip_length: 16
+    clip_stride: 8

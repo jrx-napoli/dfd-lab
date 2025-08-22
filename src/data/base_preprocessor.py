@@ -135,11 +135,7 @@ class DataPreprocessor:
         target_size = self.config["preprocessing"]["image_processing"]["target_size"]
         face = cv2.resize(face, target_size)
         
-        # Normalize
-        mean = np.array(self.config["preprocessing"]["image_processing"]["normalization"]["mean"])
-        std = np.array(self.config["preprocessing"]["image_processing"]["normalization"]["std"])
-        face = (face / 255.0 - mean) / std
-        
+        # Keep as uint8 for compact storage; defer normalization to loader
         return face
     
     def process_video(self, video_path: str, label: int) -> Dict[str, Any]:
@@ -283,8 +279,15 @@ class DataPreprocessor:
             # Initialize LMDB storage
             lmdb_path = os.path.join(split_output_dir, "data.lmdb")
             map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
-            
-            with LMDBStorage(lmdb_path, map_size=map_size) as storage:
+            compression = self.config["output"].get("lmdb", {}).get("compression")
+            compression_level = self.config["output"].get("lmdb", {}).get("compression_level", 0)
+
+            with LMDBStorage(
+                lmdb_path,
+                map_size=map_size,
+                compression=compression,
+                compression_level=compression_level,
+            ) as storage:
                 print(f"Saving {len(split_data)} samples to {lmdb_path}")
                 
                 # Store samples with progress bar
