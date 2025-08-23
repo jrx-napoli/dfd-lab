@@ -4,9 +4,7 @@ from typing import Dict, Any, List, Tuple
 
 import cv2
 # import face_alignment
-import h5py
 import numpy as np
-import torch
 from tqdm import tqdm
 
 from src.data.lmdb_storage import LMDBStorage
@@ -200,71 +198,10 @@ class DataPreprocessor:
         
         # Save processed data
         output_format = self.config["output"]["format"]
-        if output_format == "hdf5":
-            self._save_hdf5(processed_data, output_dir)
-        elif output_format == "numpy":
-            self._save_numpy(processed_data, output_dir)
-        elif output_format == "torch":
-            self._save_torch(processed_data, output_dir)
-        elif output_format == "lmdb":
+        if output_format == "lmdb":
             self._save_lmdb(processed_data, output_dir)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
-    
-    def _save_hdf5(self, data: List[Dict[str, Any]], output_dir: str):
-        """Save processed data in HDF5 format."""
-        for split in ["train", "val", "test"]:
-            split_data = [d for d in data if d["metadata"]["video_path"].split(os.sep)[-2] == split]
-            if not split_data:
-                continue
-                
-            output_path = os.path.join(output_dir, f"{split}.h5")
-            with h5py.File(output_path, "w") as f:
-                for i, item in enumerate(split_data):
-                    f.create_dataset(
-                        f"sample_{i}",
-                        data=item["data"],
-                        compression=self.config["output"]["compression"],
-                        compression_opts=self.config["output"]["compression_level"]
-                    )
-                    f[f"sample_{i}"].attrs["label"] = item["label"]
-                    
-            # Save metadata
-            metadata = {f"sample_{i}": item["metadata"] for i, item in enumerate(split_data)}
-            with open(os.path.join(output_dir, f"{split}_metadata.json"), "w") as f:
-                json.dump(metadata, f)
-    
-    def _save_numpy(self, data: List[Dict[str, Any]], output_dir: str):
-        """Save processed data in NumPy format."""
-        for split in ["train", "val", "test"]:
-            split_data = [d for d in data if d["metadata"]["video_path"].split(os.sep)[-2] == split]
-            if not split_data:
-                continue
-                
-            split_dir = os.path.join(output_dir, split)
-            os.makedirs(split_dir, exist_ok=True)
-            
-            for i, item in enumerate(split_data):
-                np.save(
-                    os.path.join(split_dir, f"{item['label']}_{i}.npy"),
-                    item["data"]
-                )
-    
-    def _save_torch(self, data: List[Dict[str, Any]], output_dir: str):
-        """Save processed data in PyTorch format."""
-        for split in ["train", "val", "test"]:
-            split_data = [d for d in data if d["metadata"]["video_path"].split(os.sep)[-2] == split]
-            if not split_data:
-                continue
-                
-            split_dir = os.path.join(output_dir, split)
-            os.makedirs(split_dir, exist_ok=True)
-            
-            for i, item in enumerate(split_data):
-                torch.save(
-                    torch.from_numpy(item["data"]),
-                    os.path.join(split_dir, f"{item['label']}_{i}.pt")
-                ) 
     
     def _save_lmdb(self, data: List[Dict[str, Any]], output_dir: str):
         """Save processed data in LMDB format."""

@@ -36,10 +36,8 @@ preprocessing:
     hop_length: 512
 
 output:
-  format: "webdataset"  # Options: "hdf5", "numpy", "torch", "lmdb", "webdataset"
+  format: "webdataset"  # Options: "lmdb", "webdataset"
   batch_size: 100
-  compression: "zstd"  # default for HDF5/numpy saving if used
-  compression_level: 10
   
   # LMDB-specific configuration
   lmdb:

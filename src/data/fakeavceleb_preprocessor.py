@@ -1,5 +1,6 @@
 import json
 import os
+import random
 from typing import Dict, Any, List, Tuple
 
 import pandas as pd
@@ -184,18 +185,7 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             output_dir: Directory to save processed data
             output_format: Format to save data in
         """
-        if output_format == "hdf5":
-            import h5py
-            self.h5_file = h5py.File(os.path.join(output_dir, 'processed_data.h5'), 'w')
-            self.h5_index = 0
-        elif output_format == "numpy":
-            self.numpy_data = []
-            self.numpy_index = 0
-        elif output_format == "torch":
-            import torch
-            self.torch_data = []
-            self.torch_index = 0
-        elif output_format == "lmdb":
+        if output_format == "lmdb":
             # Initialize LMDB storage
             lmdb_path = os.path.join(output_dir, 'processed_data.lmdb')
             map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
@@ -231,30 +221,7 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             output_dir: Directory to save processed data
             output_format: Format to save data in
         """
-        if output_format == "hdf5":
-            # Save data to HDF5 file
-            group = self.h5_file.create_group(f'sample_{self.h5_index}')
-            for key, value in result.items():
-                if key == 'metadata':
-                    # Convert metadata to string for HDF5 storage
-                    group.create_dataset(key, data=json.dumps(value))
-                else:
-                    group.create_dataset(key, data=value)
-            self.h5_index += 1
-
-        elif output_format == "numpy":
-            # Store in memory temporarily (will be saved in batches)
-            self.numpy_data.append(result)
-            if len(self.numpy_data) >= self.config["output"]["batch_size"]:
-                self._save_numpy_batch(output_dir)
-
-        elif output_format == "torch":
-            # Store in memory temporarily (will be saved in batches)
-            self.torch_data.append(result)
-            if len(self.torch_data) >= self.config["output"]["batch_size"]:
-                self._save_torch_batch(output_dir)
-
-        elif output_format == "lmdb":
+        if output_format == "lmdb":
             # Save data to LMDB
             key = f'sample_{self.lmdb_index:06d}'
             self.lmdb_storage.store_sample(key, result)
@@ -284,42 +251,75 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             output_dir: Directory to save processed data
             output_format: Format to save data in
         """
-        if output_format == "hdf5":
-            self.h5_file.close()
-        elif output_format == "numpy":
-            if self.numpy_data:  # Save any remaining data
-                self._save_numpy_batch(output_dir)
-        elif output_format == "torch":
-            if self.torch_data:  # Save any remaining data
-                self._save_torch_batch(output_dir)
-        elif output_format == "lmdb":
+        if output_format == "lmdb":
             self.lmdb_storage.close()
         elif output_format == "webdataset":
             self.shard_writer.close()
+            # After writing shards and index.csv, generate stratified train/val index files
+            try:
+                self._stratified_split_webdataset_indexes(output_dir)
+            except Exception as e:
+                print(f"Warning: failed to create train/val indexes: {e}")
 
-    def _save_numpy_batch(self, output_dir: str):
-        """Save a batch of numpy data.
-        
-        Args:
-            output_dir: Directory to save processed data
-        """
-        import numpy as np
-        batch_file = os.path.join(output_dir, f'batch_{self.numpy_index}.npz')
-        np.savez(batch_file, *self.numpy_data)
-        self.numpy_data = []
-        self.numpy_index += 1
+    def _stratified_split_webdataset_indexes(self, output_dir: str) -> None:
+        """Create index_train.csv and index_val.csv stratified by label.
 
-    def _save_torch_batch(self, output_dir: str):
-        """Save a batch of torch data.
-        
-        Args:
-            output_dir: Directory to save processed data
+        Uses data.train_split and data.val_split from config. The two ratios
+        are renormalized to sum to 1.0. Randomness is controlled by data.random_seed.
         """
-        import torch
-        batch_file = os.path.join(output_dir, f'batch_{self.torch_index}.pt')
-        torch.save(self.torch_data, batch_file)
-        self.torch_data = []
-        self.torch_index += 1
+        shard_dir = os.path.join(output_dir, 'shards')
+        wds_cfg = self.config["output"]["webdataset"]
+        index_filename = wds_cfg.get("index_filename", "index.csv")
+        index_path = os.path.join(shard_dir, index_filename)
+
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"WebDataset index not found: {index_path}")
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            header = f.readline()
+            lines = [line.rstrip("\n") for line in f]
+
+        # Group by label (5th column: sample_id,shard,dir,num_frames,label,metadata)
+        by_label: Dict[int, List[str]] = {}
+        for line in lines:
+            parts = line.split(",", 5)
+            if len(parts) < 6:
+                continue
+            try:
+                label = int(parts[4])
+            except ValueError:
+                # Skip malformed line
+                continue
+            by_label.setdefault(label, []).append(line)
+
+        train_ratio_cfg = float(self.config["data"].get("train_split", 0.7))
+        val_ratio_cfg = float(self.config["data"].get("val_split", 0.3))
+        total = max(train_ratio_cfg + val_ratio_cfg, 1e-9)
+        train_ratio = train_ratio_cfg / total
+        val_ratio = val_ratio_cfg / total
+        seed = int(self.config["data"].get("random_seed", 42))
+        rng = random.Random(seed)
+
+        train_lines: List[str] = []
+        val_lines: List[str] = []
+        for _, group in by_label.items():
+            rng.shuffle(group)
+            n_val = int(round(len(group) * val_ratio))
+            val_lines.extend(group[:n_val])
+            train_lines.extend(group[n_val:])
+
+        # Write outputs
+        train_out = os.path.join(shard_dir, "index_train.csv")
+        val_out = os.path.join(shard_dir, "index_val.csv")
+        with open(train_out, "w", encoding="utf-8") as f:
+            f.write(header)
+            for line in train_lines:
+                f.write(line + "\n")
+        with open(val_out, "w", encoding="utf-8") as f:
+            f.write(header)
+            for line in val_lines:
+                f.write(line + "\n")
+        print(f"Created stratified indexes: {os.path.basename(train_out)} ({len(train_lines)}), {os.path.basename(val_out)} ({len(val_lines)})")
 
     def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
         """Update statistics with metadata from a processed sample.
