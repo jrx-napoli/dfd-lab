@@ -292,8 +292,8 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                 continue
             by_label.setdefault(label, []).append(line)
 
-        train_ratio_cfg = float(self.config["data"].get("train_split", 0.7))
-        val_ratio_cfg = float(self.config["data"].get("val_split", 0.3))
+        train_ratio_cfg = float(self.config["data"].get("train_split", 0.8))
+        val_ratio_cfg = float(self.config["data"].get("val_split", 0.2))
         total = max(train_ratio_cfg + val_ratio_cfg, 1e-9)
         train_ratio = train_ratio_cfg / total
         val_ratio = val_ratio_cfg / total

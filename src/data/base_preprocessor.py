@@ -46,19 +46,22 @@ class DataPreprocessor:
             List of extracted frames
         """
         cap = cv2.VideoCapture(video_path)
-        fps = self.config["preprocessing"]["frame_extraction"]["fps"]
-        max_frames = self.config["preprocessing"]["frame_extraction"]["max_frames"]
+        fx_cfg = self.config["preprocessing"]["frame_extraction"]
+        fps = fx_cfg["fps"]
+        max_frames = fx_cfg["max_frames"]
+        all_frames = bool(fx_cfg.get("all_frames", False))
         
         frames = []
         frame_count = 0
-        frame_interval = int(cap.get(cv2.CAP_PROP_FPS) / fps)
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        frame_interval = 1 if all_frames or fps <= 0 or src_fps <= 0 else int(max(src_fps / fps, 1))
         
-        while cap.isOpened() and frame_count < max_frames:
+        while cap.isOpened() and (all_frames or frame_count < max_frames):
             ret, frame = cap.read()
             if not ret:
                 break
                 
-            if frame_count % frame_interval == 0:
+            if all_frames or frame_count % frame_interval == 0:
                 frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             
             frame_count += 1

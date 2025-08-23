@@ -7,7 +7,6 @@ from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 # Ensure project root is on sys.path so `src.*` imports work even when run as a script
