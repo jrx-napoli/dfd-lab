@@ -20,42 +20,6 @@ class XceptionMaxFusionDetector(BaseDetector):
         # --- Audio Predictor (Xception from timm) ---
         self.audio_model = timm.create_model('xception', pretrained=True, num_classes=num_classes, in_chans=1)
 
-    def get_video_features(self, image_input: torch.Tensor) -> torch.Tensor:
-        """Extract video features using Xception backbone."""
-        if image_input.ndim != 5:
-            raise ValueError("Input must be a video sequence with shape (B, T, C, H, W)")
-        
-        B, T, C, H, W = image_input.shape
-        video_reshaped = image_input.view(B * T, C, H, W)
-        
-        features = self.video_model.forward_features(video_reshaped)
-        
-        if features.dim() == 4:
-            features = features.mean(dim=[-2, -1])
-        
-        features = features.view(B, T, -1)
-        final_features = features.mean(dim=1)
-        
-        return final_features
-
-    def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
-        """Extract audio features using Xception backbone."""
-        if audio_input.ndim != 5:
-            raise ValueError("Input must be an audio sequence with shape (B, T, C, H, W)")
-        
-        B, T, C, H, W = audio_input.shape
-        audio_reshaped = audio_input.view(B * T, C, H, W)
-        
-        features = self.audio_model.forward_features(audio_reshaped)
-        
-        if features.dim() == 4:
-            features = features.mean(dim=[-2, -1])
-        
-        features = features.view(B, T, -1)
-        final_features = features.mean(dim=1)
-        
-        return final_features
-
     def forward(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
     """
     Forward pass of the XceptionMaxFusionDetector.
@@ -123,7 +87,43 @@ class XceptionMaxFusionDetector(BaseDetector):
         video_features = self.get_video_features(image_input)
         audio_features = self.get_audio_features(audio_input)
         return video_features, audio_features
-    
+
+    def get_video_features(self, image_input: torch.Tensor) -> torch.Tensor:
+        """Extract video features using Xception backbone."""
+        if image_input.ndim != 5:
+            raise ValueError("Input must be a video sequence with shape (B, T, C, H, W)")
+        
+        B, T, C, H, W = image_input.shape
+        video_reshaped = image_input.view(B * T, C, H, W)
+        
+        features = self.video_model.forward_features(video_reshaped)
+        
+        if features.dim() == 4:
+            features = features.mean(dim=[-2, -1])
+        
+        features = features.view(B, T, -1)
+        final_features = features.mean(dim=1)
+        
+        return final_features
+
+    def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
+        """Extract audio features using Xception backbone."""
+        if audio_input.ndim != 5:
+            raise ValueError("Input must be an audio sequence with shape (B, T, C, H, W)")
+        
+        B, T, C, H, W = audio_input.shape
+        audio_reshaped = audio_input.view(B * T, C, H, W)
+        
+        features = self.audio_model.forward_features(audio_reshaped)
+        
+        if features.dim() == 4:
+            features = features.mean(dim=[-2, -1])
+        
+        features = features.view(B, T, -1)
+        final_features = features.mean(dim=1)
+        
+        return final_features
+
     def predict_single_modality(self, image_input: Optional[torch.Tensor] = None, 
                                 audio_input: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Get predictions using only one modality."""
