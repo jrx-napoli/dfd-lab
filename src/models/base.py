@@ -1,70 +1,80 @@
 from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
+from typing import Tuple, Optional
 
 class BaseDetector(nn.Module, ABC):
-    """Base class for all deepfake detectors."""
+    """Base class for multi-modal deepfake detectors."""
     
     def __init__(self, num_classes: int = 2):
         super().__init__()
         self.num_classes = num_classes
         
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
         """Forward pass of the model.
         
         Args:
-            x: Input tensor of shape (batch_size, channels, height, width)
-            
+            image_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
+            audio_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
         Returns:
             Output tensor of shape (batch_size, num_classes)
         """
         pass
-    
+
     @abstractmethod
-    def get_features(self, x: torch.Tensor) -> torch.Tensor:
-        """Extract features from the input.
+    def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
+        """Get model predictions for multi-modal input.
         
         Args:
-            x: Input tensor of shape (batch_size, channels, height, width)
-            
+            image_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
+            audio_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
         Returns:
-            Feature tensor
+            Tensor of predicted classes (0 or 1) - one prediction per video in the batch
         """
         pass
+
+    @abstractmethod
+    def get_confidence(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
+        """Get prediction confidence scores for multi-modal input."""
+        pass
     
-    def predict(self, x: torch.Tensor) -> torch.Tensor:
-        """Get model predictions.
+    @abstractmethod
+    def get_modality_features(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Extract features from both modalities."""
+        pass
+
+    @abstractmethod
+    def get_video_features(self, image_input: torch.Tensor) -> torch.Tensor:
+        """Extract features from the image input.
         
         Args:
-            x: Input tensor of shape (batch_size, channels, height, width)
-            
+            image_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
         Returns:
-            Predicted class probabilities of shape (batch_size, num_classes)
+            Video feature tensor
         """
-        self.eval()
-        with torch.no_grad():
-            return torch.softmax(self.forward(x), dim=1)
-    
-    def predict_class(self, x: torch.Tensor) -> torch.Tensor:
-        """Get predicted class labels.
+        pass
+
+    @abstractmethod
+    def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
+        """Extract features from the audio input.
         
         Args:
-            x: Input tensor of shape (batch_size, channels, height, width)
-            
+            audio_input: Input tensor of shape (batch_size, num_frames, channels, height, width)
         Returns:
-            Predicted class labels of shape (batch_size,)
+            Audio feature tensor
         """
-        return torch.argmax(self.predict(x), dim=1)
-    
-    def get_confidence(self, x: torch.Tensor) -> torch.Tensor:
-        """Get prediction confidence scores.
+        pass
+
+    @abstractmethod
+    def predict_single_modality(self, image_input: Optional[torch.Tensor] = None, 
+                                audio_input: Optional[torch.Tensor] = None) -> int:
+        """Get predictions using only one modality (for ablation studies or single-modality inference).
         
         Args:
-            x: Input tensor of shape (batch_size, channels, height, width)
-            
+            image_input: Optional image input tensor
+            audio_input: Optional audio input tensor
         Returns:
-            Confidence scores of shape (batch_size,)
+            Predicted class (0 or 1) - the class with maximum probability
         """
-        probs = self.predict(x)
-        return torch.max(probs, dim=1)[0] 
+        pass
