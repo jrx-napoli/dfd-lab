@@ -86,11 +86,33 @@ class ShardClipDataset(IterableDataset):
                     meta["id"] = sample_id
                     meta["num_frames"] = num_frames
 
-                    yield {
+                    # Optional audio mel features
+                    mel_tensor = None
+                    mel_shape_member = members.get(f"{sample_dir}/audio_mel.json")
+                    mel_data_member = members.get(f"{sample_dir}/audio_mel.f16")
+                    if mel_shape_member is not None and mel_data_member is not None:
+                        try:
+                            shape_info = json.loads(tar.extractfile(mel_shape_member).read().decode("utf-8"))
+                            arr_bytes = tar.extractfile(mel_data_member).read()
+                            shape = shape_info.get("shape", [])
+                            if isinstance(shape, list) and len(shape) == 2:
+                                mels, time_len = int(shape[0]), int(shape[1])
+                                arr = np.frombuffer(arr_bytes, dtype=np.float16)
+                                if arr.size == mels * time_len:
+                                    mel_np = arr.reshape(mels, time_len)
+                                    mel_tensor = torch.from_numpy(mel_np)
+                        except Exception:
+                            mel_tensor = None
+
+                    sample = {
                         "data": torch.from_numpy(data).to(self.target_device),
                         "label": label,
                         "metadata": meta,
                     }
+                    if mel_tensor is not None:
+                        sample["audio_mel"] = mel_tensor
+
+                    yield sample
 
     def __iter__(self):
         return self._iter_samples()

@@ -78,10 +78,12 @@ def main(shards_dir: str, index_filename: str, device: str, max_samples: Optiona
 
     try:
         for idx, sample in enumerate(ds):
+            has_audio = "audio_mel" in sample
             data: torch.Tensor = sample["data"]
             label = int(sample["label"]) if not isinstance(sample["label"], torch.Tensor) else int(sample["label"].item())
             meta = sample.get("metadata", {})
-            title = f"sample {meta.get('id', idx)} | label={label} | frames={meta.get('num_frames', data.shape[0])}"
+            print(sample)
+            title = f"sample {meta.get('id', idx)} | label={label} | frames={meta.get('num_frames', data.shape[0])} | audio={'yes' if has_audio else 'no'}"
             play_clip(data, title=title, fps=fps)
             # After clip ends, wait for next or quit
             print(title)

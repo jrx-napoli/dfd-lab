@@ -228,19 +228,46 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             self.lmdb_index += 1
             self.sample_index += 1
         elif output_format == "webdataset":
-            # Save as a clip sample
-            clip_len = int(self.config["output"]["webdataset"].get("clip_length", 16))
-            clip_stride = int(self.config["output"]["webdataset"].get("clip_stride", clip_len))
+            # Save as clip samples with optional aligned audio mel-spectrogram slices
+            wds_cfg = self.config["output"]["webdataset"]
+            clip_len = int(wds_cfg.get("clip_length", 16))
+            clip_stride = int(wds_cfg.get("clip_stride", clip_len))
             frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
             label = int(result["label"])
-            meta = result["metadata"].copy()
-            # Create clips
+            meta_base = result["metadata"].copy()
+
             t = frames.shape[0]
+            fps = float(meta_base.get("fps", 25.0))
+            audio_mel_full = result.get("audio_mel_full")  # [n_mels, time] float16 np.ndarray or None
+            audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
+            sr = int(audio_cfg.get("sample_rate", 16000))
+            hop = int(audio_cfg.get("hop_length", 512))
+
+            # If audio present, compute mapping from frame indices to mel frame indices via time
+            mel_per_second = sr / hop if hop > 0 else 0.0
+
             start = 0
             while start + clip_len <= t:
                 clip = frames[start:start + clip_len]
                 sample_id = f"{self.sample_index:06d}_{start:06d}"
-                self.shard_writer.add_sample(sample_id, clip, label, meta)
+                meta = meta_base.copy()
+                meta["clip_start_frame"] = int(start)
+                meta["clip_length"] = int(clip_len)
+
+                mel_clip: np.ndarray | None = None
+                if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
+                    # Time range for the clip in seconds
+                    t0 = start / fps
+                    t1 = (start + clip_len) / fps
+                    # Map to mel frame indices
+                    m0 = int(np.floor(t0 * mel_per_second))
+                    m1 = int(np.ceil(t1 * mel_per_second))
+                    m0 = max(0, m0)
+                    m1 = min(audio_mel_full.shape[1], m1)
+                    if m1 > m0:
+                        mel_clip = audio_mel_full[:, m0:m1]
+
+                self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
                 start += clip_stride
             self.sample_index += 1
 

@@ -1,10 +1,17 @@
 import json
 import os
-from typing import Dict, Any, List, Tuple
+import subprocess
+from typing import Dict, Any, List, Tuple, Optional
 
 import cv2
 # import face_alignment
 import numpy as np
+import torch
+import torchaudio
+try:
+    import librosa  # type: ignore
+except Exception:
+    librosa = None  # type: ignore
 from tqdm import tqdm
 
 from src.data.lmdb_storage import LMDBStorage
@@ -46,28 +53,88 @@ class DataPreprocessor:
             List of extracted frames
         """
         cap = cv2.VideoCapture(video_path)
-        fx_cfg = self.config["preprocessing"]["frame_extraction"]
-        fps = fx_cfg["fps"]
-        max_frames = fx_cfg["max_frames"]
-        all_frames = bool(fx_cfg.get("all_frames", False))
-        
+
         frames = []
-        frame_count = 0
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 0
-        frame_interval = 1 if all_frames or fps <= 0 or src_fps <= 0 else int(max(src_fps / fps, 1))
-        
-        while cap.isOpened() and (all_frames or frame_count < max_frames):
+        while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-                
-            if all_frames or frame_count % frame_interval == 0:
-                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            
-            frame_count += 1
-            
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
         cap.release()
         return frames
+
+    def get_video_fps(self, video_path: str) -> float:
+        """Get frames-per-second (FPS) of the input video."""
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        cap.release()
+        # Fallback to a sensible default if FPS could not be determined
+        return float(fps if fps and fps > 0 else 25.0)
+
+    def _extract_audio_waveform(self, video_path: str, target_sample_rate: int) -> Optional[torch.Tensor]:
+        """Extract mono audio waveform from a video using librosa only.
+
+        Returns a 1D float32 tensor of shape [num_samples] at target_sample_rate, or None on failure.
+        """
+        try:
+            if librosa is None:
+                return None
+            y_np, _ = librosa.load(video_path, sr=target_sample_rate, mono=True)
+            if y_np is None or y_np.size == 0:
+                return None
+            return torch.from_numpy(y_np.astype(np.float32, copy=False))
+        except Exception:
+            return None
+
+    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int, fmax: Optional[float]) -> Optional[np.ndarray]:
+        """Extract mel spectrogram using ffmpeg (PCM s16le) + librosa.
+
+        Returns a numpy array [n_mels, time] in dB scale, or None on failure.
+        """
+        try:
+            cmd = [
+                "ffmpeg", "-i", video_path,
+                "-f", "s16le",
+                "-acodec", "pcm_s16le",
+                "-ac", "1",
+                "-ar", str(sr),
+                "-",
+            ]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
+            raw_audio = proc.stdout
+            if not raw_audio:
+                return None
+            y = np.frombuffer(raw_audio, np.int16).astype(np.float32) / 32768.0
+            if y.size == 0:
+                return None
+            mel_kwargs = {"y": y, "sr": sr, "n_mels": n_mels, "n_fft": n_fft, "hop_length": hop_length}
+            if fmax is not None:
+                mel_kwargs["fmax"] = fmax
+            S = librosa.feature.melspectrogram(**mel_kwargs)
+            S_dB = librosa.power_to_db(S, ref=np.max)
+            return S_dB.astype(np.float32)
+        except Exception:
+            return None
+
+    def _compute_full_mel(self, waveform: torch.Tensor, sample_rate: int, n_mels: int, n_fft: int, hop_length: int) -> torch.Tensor:
+        """Compute full log-mel spectrogram for a mono waveform.
+
+        Returns tensor of shape [n_mels, num_frames].
+        """
+        # [1, T]
+        waveform = waveform.unsqueeze(0)
+        mel_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            center=True,
+            power=2.0,
+        )
+        mel = mel_transform(waveform)  # [1, n_mels, time]
+        mel_db = torchaudio.transforms.AmplitudeToDB(stype="power")(mel)
+        return mel_db.squeeze(0)  # [n_mels, time]
     
     def detect_face(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """Detect face in frame.
@@ -149,8 +216,9 @@ class DataPreprocessor:
         Returns:
             Dictionary containing processed data and metadata
         """
-        # Extract frames
+        # Extract frames and fps
         frames = self.extract_frames(video_path)
+        fps = self.get_video_fps(video_path)
         
         # Process frames
         processed_frames = []
@@ -161,15 +229,43 @@ class DataPreprocessor:
         
         if not processed_frames:
             return None
-            
-        return {
+
+        result: Dict[str, Any] = {
             "data": np.stack(processed_frames),
             "label": label,
             "metadata": {
                 "num_frames": len(processed_frames),
-                "video_path": video_path
-            }
+                "video_path": video_path,
+                "fps": float(fps),
+            },
         }
+
+        # Optionally extract audio and compute full mel spectrogram (for later clip slicing)
+        audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
+        if audio_cfg and audio_cfg.get("enabled", False):
+            sr = int(audio_cfg.get("sample_rate", 16000))
+            n_mels = int(audio_cfg.get("n_mels", 80))
+            n_fft = int(audio_cfg.get("n_fft", 2048))
+            hop = int(audio_cfg.get("hop_length", 512))
+            fmax = None
+            # Optional fmax from config
+            fmax_cfg = self.config["preprocessing"].get("audio_processing", {}).get("fmax")
+            if fmax_cfg is not None:
+                try:
+                    fmax = float(fmax_cfg)
+                except Exception:
+                    fmax = None
+            mel_db = self._extract_audio_mel(video_path, sr, n_mels, n_fft, hop, fmax)
+            if mel_db is not None and mel_db.size > 0:
+                # Store as numpy float16 for compactness
+                result["audio_mel_full"] = mel_db.astype(np.float16)
+                result["metadata"].update({
+                    "audio_sample_rate": sr,
+                    "mel_hop_length": hop,
+                    "mel_n_mels": n_mels,
+                })
+
+        return result
     
     def process_dataset(self, input_dir: str, output_dir: str):
         """Process entire dataset.

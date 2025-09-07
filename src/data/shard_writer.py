@@ -99,6 +99,8 @@ class ShardWriter:
         frames_rgb: np.ndarray,
         label: int,
         sample_metadata: Dict[str, Any],
+        *,
+        mel_clip: np.ndarray | None = None,
     ) -> None:
         """Add a sample consisting of frames and metadata.
 
@@ -118,8 +120,13 @@ class ShardWriter:
         }
         meta.update(sample_metadata or {})
 
-        # Pre-encode and estimate size
+        # Account for mel size in estimate if provided
         estimated_size, buffers, ext = self._estimate_sample_size(frames_rgb, meta)
+        if mel_clip is not None:
+            # store mel as float16 npy serialized bytes
+            mel_bytes = mel_clip.astype(np.float16).tobytes(order="C")
+            # add small header estimate for shape/metadata json
+            estimated_size += len(mel_bytes) + 128
 
         # Rotate shard if needed
         if self._bytes_written + estimated_size > self.max_shard_size_bytes:
@@ -144,6 +151,26 @@ class ShardWriter:
         info.mtime = mtime
         self._tar.addfile(info, io.BytesIO(meta_bytes))
         self._bytes_written += info.size
+
+        # Write mel spectrogram if available
+        if mel_clip is not None:
+            # Save raw float16 binary and separate shape json for compactness
+            mel_arr = mel_clip.astype(np.float16, copy=False)
+            mel_raw = mel_arr.tobytes(order="C")
+            # mel.bin
+            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel.f16")
+            info.size = len(mel_raw)
+            info.mtime = mtime
+            self._tar.addfile(info, io.BytesIO(mel_raw))
+            self._bytes_written += info.size
+            # mel shape
+            mel_shape = {"shape": list(mel_arr.shape), "dtype": "float16", "layout": "[mels,time]"}
+            mel_shape_bytes = json.dumps(mel_shape).encode("utf-8")
+            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel.json")
+            info.size = len(mel_shape_bytes)
+            info.mtime = mtime
+            self._tar.addfile(info, io.BytesIO(mel_shape_bytes))
+            self._bytes_written += info.size
 
         # Append to index
         rel_shard = os.path.basename(self._tar_path)
