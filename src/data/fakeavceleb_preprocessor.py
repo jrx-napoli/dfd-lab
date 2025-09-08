@@ -8,7 +8,6 @@ import numpy as np
 from tqdm import tqdm
 
 from src.data.base_preprocessor import DataPreprocessor
-from src.data.lmdb_storage import LMDBStorage
 from src.data.shard_writer import ShardWriter
 
 
@@ -106,11 +105,9 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
             'race_distribution': {}
         }
 
-        # Initialize output format specific storage
-        output_format = self.config["output"]["format"]
-        # Generic counter for processed items (videos). Used for IDs/logging across formats
+        # Initialize shards-only storage
         self.sample_index = 0
-        self._initialize_output_storage(output_dir, output_format)
+        self._initialize_output_storage(output_dir)
 
         # Process each category
         for category in ['A', 'B', 'C', 'D']:
@@ -140,153 +137,89 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                         result['metadata'].update(metadata)
                         
                         # Save result incrementally
-                        self._save_incremental(result, output_dir, output_format)
+                        self._save_incremental(result, output_dir)
                         
                         # Update statistics
                         self._update_statistics(stats, result['metadata'])
                         stats['total_samples'] += 1
 
                 except Exception as e:
-                    # Check if this is our MDB_MAP_FULL error that should stop processing
-                    if "MDB_MAP_FULL" in str(e) or "Environment mapsize limit reached" in str(e):
-                        error_msg = (
-                            f"\n\n{'=' * 64}\n"
-                            f"ERROR: LMDB storage limit reached!\n"
-                            f"{'=' * 64}\n"
-                            f"The LMDB database has reached its maximum size limit.\n"
-                            f"Current map size: {self.lmdb_storage.map_size / (1024 ** 3):.1f} GB\n"
-                            f"Processed samples: {getattr(self, 'sample_index', getattr(self, 'lmdb_index', 0))}\n"
-                            # f"Last attempted sample: {key}\n\n"
-                            f"To continue processing, please:\n"
-                            f"1. Increase the 'map_size_gb' value in your configuration file\n"
-                            f"2. Restart the preprocessing with a larger map size\n"
-                            f"{'=' * 64}\n"
-                        )
-                        print(error_msg)
-
-                        # Close the storage cleanly
-                        self.lmdb_storage.close()
-                        return
-                    else:
-                        # Other errors - log and continue with next video
-                        print(f"\nError processing {video_path}: {str(e)}")
-                        continue
+                    # Log and continue with next video
+                    print(f"\nError processing {video_path}: {str(e)}")
+                    continue
 
         # Finalize output storage
-        self._finalize_output_storage(output_dir, output_format)
+        self._finalize_output_storage(output_dir)
 
         # Save dataset statistics
         self._save_dataset_statistics(stats, output_dir)
 
-    def _initialize_output_storage(self, output_dir: str, output_format: str):
-        """Initialize storage for the specified output format.
-        
-        Args:
-            output_dir: Directory to save processed data
-            output_format: Format to save data in
-        """
-        if output_format == "lmdb":
-            # Initialize LMDB storage
-            lmdb_path = os.path.join(output_dir, 'processed_data.lmdb')
-            map_size = self.config["output"]["lmdb"]["map_size_gb"] * 1024 * 1024 * 1024
-            compression = self.config["output"].get("lmdb", {}).get("compression")
-            compression_level = self.config["output"].get("lmdb", {}).get("compression_level", 0)
-            self.lmdb_storage = LMDBStorage(
-                lmdb_path,
-                map_size=map_size,
-                compression=compression,
-                compression_level=compression_level,
-            )
-            self.lmdb_storage.open()
-            self.lmdb_index = 0
-        elif output_format == "webdataset":
-            wds_cfg = self.config["output"]["webdataset"]
-            shard_dir = os.path.join(output_dir, 'shards')
-            self.shard_writer = ShardWriter(
-                output_dir=shard_dir,
-                shard_prefix=wds_cfg.get("prefix", "shard"),
-                max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
-                image_codec=wds_cfg.get("image_codec", "webp"),
-                image_quality=int(wds_cfg.get("image_quality", 90)),
-                index_filename=wds_cfg.get("index_filename", "index.csv"),
-            )
-        else:
-            raise ValueError(f"Unsupported output format: {output_format}")
+    def _initialize_output_storage(self, output_dir: str):
+        """Initialize shards-only storage."""
+        wds_cfg = self.config["output"]["webdataset"]
+        shard_dir = os.path.join(output_dir, 'shards')
+        self.shard_writer = ShardWriter(
+            output_dir=shard_dir,
+            shard_prefix=wds_cfg.get("prefix", "shard"),
+            max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
+            image_codec=wds_cfg.get("image_codec", "webp"),
+            image_quality=int(wds_cfg.get("image_quality", 90)),
+            index_filename=wds_cfg.get("index_filename", "index.csv"),
+        )
 
-    def _save_incremental(self, result: Dict[str, Any], output_dir: str, output_format: str):
-        """Save a single result incrementally.
-        
-        Args:
-            result: Processed data sample
-            output_dir: Directory to save processed data
-            output_format: Format to save data in
-        """
-        if output_format == "lmdb":
-            # Save data to LMDB
-            key = f'sample_{self.lmdb_index:06d}'
-            self.lmdb_storage.store_sample(key, result)
-            self.lmdb_index += 1
-            self.sample_index += 1
-        elif output_format == "webdataset":
-            # Save as clip samples with optional aligned audio mel-spectrogram slices
-            wds_cfg = self.config["output"]["webdataset"]
-            clip_len = int(wds_cfg.get("clip_length", 16))
-            clip_stride = int(wds_cfg.get("clip_stride", clip_len))
-            frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
-            label = int(result["label"])
-            meta_base = result["metadata"].copy()
+    def _save_incremental(self, result: Dict[str, Any], output_dir: str):
+        """Save a single result incrementally (shards-only)."""
+        # Save as clip samples with optional aligned audio mel-spectrogram slices
+        wds_cfg = self.config["output"]["webdataset"]
+        clip_len = int(wds_cfg.get("clip_length", 16))
+        clip_stride = int(wds_cfg.get("clip_stride", clip_len))
+        frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
+        label = int(result["label"])
+        meta_base = result["metadata"].copy()
 
-            t = frames.shape[0]
-            fps = float(meta_base.get("fps", 25.0))
-            audio_mel_full = result.get("audio_mel_full")  # [n_mels, time] float16 np.ndarray or None
-            audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
-            sr = int(audio_cfg.get("sample_rate", 16000))
-            hop = int(audio_cfg.get("hop_length", 512))
+        t = frames.shape[0]
+        fps = float(meta_base.get("fps", 25.0))
+        audio_mel_full = result.get("audio_mel_full")  # [n_mels, time] float16 np.ndarray or None
+        audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
+        sr = int(audio_cfg.get("sample_rate", 16000))
+        hop = int(audio_cfg.get("hop_length", 512))
 
-            # If audio present, compute mapping from frame indices to mel frame indices via time
-            mel_per_second = sr / hop if hop > 0 else 0.0
+        # If audio present, compute mapping from frame indices to mel frame indices via time
+        mel_per_second = sr / hop if hop > 0 else 0.0
 
-            start = 0
-            while start + clip_len <= t:
-                clip = frames[start:start + clip_len]
-                sample_id = f"{self.sample_index:06d}_{start:06d}"
-                meta = meta_base.copy()
-                meta["clip_start_frame"] = int(start)
-                meta["clip_length"] = int(clip_len)
+        start = 0
+        while start + clip_len <= t:
+            clip = frames[start:start + clip_len]
+            sample_id = f"{self.sample_index:06d}_{start:06d}"
+            meta = meta_base.copy()
+            meta["clip_start_frame"] = int(start)
+            meta["clip_length"] = int(clip_len)
 
-                mel_clip: np.ndarray | None = None
-                if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
-                    # Time range for the clip in seconds
-                    t0 = start / fps
-                    t1 = (start + clip_len) / fps
-                    # Map to mel frame indices
-                    m0 = int(np.floor(t0 * mel_per_second))
-                    m1 = int(np.ceil(t1 * mel_per_second))
-                    m0 = max(0, m0)
-                    m1 = min(audio_mel_full.shape[1], m1)
-                    if m1 > m0:
-                        mel_clip = audio_mel_full[:, m0:m1]
+            mel_clip: np.ndarray | None = None
+            if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
+                # Time range for the clip in seconds
+                t0 = start / fps
+                t1 = (start + clip_len) / fps
+                # Map to mel frame indices
+                m0 = int(np.floor(t0 * mel_per_second))
+                m1 = int(np.ceil(t1 * mel_per_second))
+                m0 = max(0, m0)
+                m1 = min(audio_mel_full.shape[1], m1)
+                if m1 > m0:
+                    mel_clip = audio_mel_full[:, m0:m1]
 
-                self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
-                start += clip_stride
-            self.sample_index += 1
+            self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
+            start += clip_stride
+        self.sample_index += 1
 
-    def _finalize_output_storage(self, output_dir: str, output_format: str):
-        """Finalize storage and save any remaining data.
-        
-        Args:
-            output_dir: Directory to save processed data
-            output_format: Format to save data in
-        """
-        if output_format == "lmdb":
-            self.lmdb_storage.close()
-        elif output_format == "webdataset":
-            self.shard_writer.close()
-            # After writing shards and index.csv, generate stratified train/val index files
-            try:
-                self._stratified_split_webdataset_indexes(output_dir)
-            except Exception as e:
-                print(f"Warning: failed to create train/val indexes: {e}")
+    def _finalize_output_storage(self, output_dir: str):
+        """Finalize shards storage and save any remaining data."""
+        self.shard_writer.close()
+        # After writing shards and index.csv, generate stratified train/val index files
+        try:
+            self._stratified_split_webdataset_indexes(output_dir)
+        except Exception as e:
+            print(f"Warning: failed to create train/val indexes: {e}")
 
     def _stratified_split_webdataset_indexes(self, output_dir: str) -> None:
         """Create index_train.csv and index_val.csv stratified by label.

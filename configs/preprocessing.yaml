@@ -12,16 +12,16 @@ preprocessing:
     margin: 0.2  # Margin around detected face as percentage of face size
 
   image_processing:
-    target_size: [224, 224]
+    target_size: [ 224, 224 ]
     normalization:
-      mean: [0.485, 0.456, 0.406]  # ImageNet mean
-      std: [0.229, 0.224, 0.225]   # ImageNet std
+      mean: [ 0.485, 0.456, 0.406 ]  # ImageNet mean
+      std: [ 0.229, 0.224, 0.225 ]   # ImageNet std
     augmentations:
       enabled: true
       horizontal_flip: true
       rotation_range: 15
-      brightness_range: [0.8, 1.2]
-      contrast_range: [0.8, 1.2]
+      brightness_range: [ 0.8, 1.2 ]
+      contrast_range: [ 0.8, 1.2 ]
 
   audio_processing:
     enabled: true
@@ -31,19 +31,9 @@ preprocessing:
     hop_length: 512
 
 output:
-  format: "webdataset"  # Options: "lmdb", "webdataset"
   batch_size: 100
-  
-  # LMDB-specific configuration
-  lmdb:
-    map_size_gb: 6  # Maximum database size in GB
-    max_readers: 1024
-    create_indexes: true  # Whether to create indexes for efficient querying
-    index_fields: ["label", "category", "method"]  # Fields to index
-    compression: "zstd"  # Options: "zstd", "zlib", null
-    compression_level: 10
 
-  # WebDataset-specific configuration
+  # WebDataset configuration
   webdataset:
     prefix: "shard"
     max_shard_size_mb: 1024
