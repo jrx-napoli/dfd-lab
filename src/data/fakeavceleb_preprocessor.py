@@ -1,14 +1,10 @@
-import json
 import os
-import random
 from typing import Dict, Any, List, Tuple
 
 import pandas as pd
-import numpy as np
 from tqdm import tqdm
 
 from src.data.base_preprocessor import DataPreprocessor
-from src.data.shard_writer import ShardWriter
 
 
 class FakeAVCelebPreprocessor(DataPreprocessor):
@@ -135,10 +131,10 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                     if result is not None:
                         # Add metadata to result
                         result['metadata'].update(metadata)
-                        
+
                         # Save result incrementally
                         self._save_incremental(result, output_dir)
-                        
+
                         # Update statistics
                         self._update_statistics(stats, result['metadata'])
                         stats['total_samples'] += 1
@@ -153,133 +149,6 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
 
         # Save dataset statistics
         self._save_dataset_statistics(stats, output_dir)
-
-    def _initialize_output_storage(self, output_dir: str):
-        """Initialize shards-only storage."""
-        wds_cfg = self.config["output"]["webdataset"]
-        shard_dir = os.path.join(output_dir, 'shards')
-        self.shard_writer = ShardWriter(
-            output_dir=shard_dir,
-            shard_prefix=wds_cfg.get("prefix", "shard"),
-            max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
-            image_codec=wds_cfg.get("image_codec", "webp"),
-            image_quality=int(wds_cfg.get("image_quality", 90)),
-            index_filename=wds_cfg.get("index_filename", "index.csv"),
-        )
-
-    def _save_incremental(self, result: Dict[str, Any], output_dir: str):
-        """Save a single result incrementally (shards-only)."""
-        # Save as clip samples with optional aligned audio mel-spectrogram slices
-        wds_cfg = self.config["output"]["webdataset"]
-        clip_len = int(wds_cfg.get("clip_length", 16))
-        clip_stride = int(wds_cfg.get("clip_stride", clip_len))
-        frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
-        label = int(result["label"])
-        meta_base = result["metadata"].copy()
-
-        t = frames.shape[0]
-        fps = float(meta_base.get("fps", 25.0))
-        audio_mel_full = result.get("audio_mel_full")  # [n_mels, time] float16 np.ndarray or None
-        audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
-        sr = int(audio_cfg.get("sample_rate", 16000))
-        hop = int(audio_cfg.get("hop_length", 512))
-
-        # If audio present, compute mapping from frame indices to mel frame indices via time
-        mel_per_second = sr / hop if hop > 0 else 0.0
-
-        start = 0
-        while start + clip_len <= t:
-            clip = frames[start:start + clip_len]
-            sample_id = f"{self.sample_index:06d}_{start:06d}"
-            meta = meta_base.copy()
-            meta["clip_start_frame"] = int(start)
-            meta["clip_length"] = int(clip_len)
-
-            mel_clip: np.ndarray | None = None
-            if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
-                # Time range for the clip in seconds
-                t0 = start / fps
-                t1 = (start + clip_len) / fps
-                # Map to mel frame indices
-                m0 = int(np.floor(t0 * mel_per_second))
-                m1 = int(np.ceil(t1 * mel_per_second))
-                m0 = max(0, m0)
-                m1 = min(audio_mel_full.shape[1], m1)
-                if m1 > m0:
-                    mel_clip = audio_mel_full[:, m0:m1]
-
-            self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
-            start += clip_stride
-        self.sample_index += 1
-
-    def _finalize_output_storage(self, output_dir: str):
-        """Finalize shards storage and save any remaining data."""
-        self.shard_writer.close()
-        # After writing shards and index.csv, generate stratified train/val index files
-        try:
-            self._stratified_split_webdataset_indexes(output_dir)
-        except Exception as e:
-            print(f"Warning: failed to create train/val indexes: {e}")
-
-    def _stratified_split_webdataset_indexes(self, output_dir: str) -> None:
-        """Create index_train.csv and index_val.csv stratified by label.
-
-        Uses data.train_split and data.val_split from config. The two ratios
-        are renormalized to sum to 1.0. Randomness is controlled by data.random_seed.
-        """
-        shard_dir = os.path.join(output_dir, 'shards')
-        wds_cfg = self.config["output"]["webdataset"]
-        index_filename = wds_cfg.get("index_filename", "index.csv")
-        index_path = os.path.join(shard_dir, index_filename)
-
-        if not os.path.exists(index_path):
-            raise FileNotFoundError(f"WebDataset index not found: {index_path}")
-
-        with open(index_path, "r", encoding="utf-8") as f:
-            header = f.readline()
-            lines = [line.rstrip("\n") for line in f]
-
-        # Group by label (5th column: sample_id,shard,dir,num_frames,label,metadata)
-        by_label: Dict[int, List[str]] = {}
-        for line in lines:
-            parts = line.split(",", 5)
-            if len(parts) < 6:
-                continue
-            try:
-                label = int(parts[4])
-            except ValueError:
-                # Skip malformed line
-                continue
-            by_label.setdefault(label, []).append(line)
-
-        train_ratio_cfg = float(self.config["data"].get("train_split", 0.8))
-        val_ratio_cfg = float(self.config["data"].get("val_split", 0.2))
-        total = max(train_ratio_cfg + val_ratio_cfg, 1e-9)
-        train_ratio = train_ratio_cfg / total
-        val_ratio = val_ratio_cfg / total
-        seed = int(self.config["data"].get("random_seed", 42))
-        rng = random.Random(seed)
-
-        train_lines: List[str] = []
-        val_lines: List[str] = []
-        for _, group in by_label.items():
-            rng.shuffle(group)
-            n_val = int(round(len(group) * val_ratio))
-            val_lines.extend(group[:n_val])
-            train_lines.extend(group[n_val:])
-
-        # Write outputs
-        train_out = os.path.join(shard_dir, "index_train.csv")
-        val_out = os.path.join(shard_dir, "index_val.csv")
-        with open(train_out, "w", encoding="utf-8") as f:
-            f.write(header)
-            for line in train_lines:
-                f.write(line + "\n")
-        with open(val_out, "w", encoding="utf-8") as f:
-            f.write(header)
-            for line in val_lines:
-                f.write(line + "\n")
-        print(f"Created stratified indexes: {os.path.basename(train_out)} ({len(train_lines)}), {os.path.basename(val_out)} ({len(val_lines)})")
 
     def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
         """Update statistics with metadata from a processed sample.
@@ -303,14 +172,3 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
         # Update race statistics
         race = metadata['race']
         stats['race_distribution'][race] = stats['race_distribution'].get(race, 0) + 1
-
-    def _save_dataset_statistics(self, stats: Dict[str, Any], output_dir: str):
-        """Save dataset statistics.
-        
-        Args:
-            stats: Statistics dictionary
-            output_dir: Directory to save statistics
-        """
-        stats_path = os.path.join(output_dir, 'dataset_statistics.json')
-        with open(stats_path, 'w') as f:
-            json.dump(stats, f, indent=2)

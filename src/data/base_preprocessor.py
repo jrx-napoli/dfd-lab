@@ -1,19 +1,19 @@
 import os
 import subprocess
+from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Tuple, Optional
 
 import cv2
 import librosa
 # import face_alignment
 import numpy as np
-from tqdm import tqdm
 
 from src.data.shard_writer import ShardWriter
 
 
-class DataPreprocessor:
-    """Class for preprocessing deepfake detection data."""
-    
+class DataPreprocessor(ABC):
+    """Abstract base class for preprocessing deepfake detection data."""
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize the preprocessor.
         
@@ -22,7 +22,8 @@ class DataPreprocessor:
         """
         self.config = config
         self.face_detector = self._initialize_face_detector()
-        
+        self.sample_index = 0
+
     def _initialize_face_detector(self):
         """Initialize face detector based on configuration."""
         detector_type = self.config["preprocessing"]["face_detection"]["detector"]
@@ -36,7 +37,7 @@ class DataPreprocessor:
             return cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         else:
             raise ValueError(f"Unsupported face detector: {detector_type}")
-    
+
     def extract_frames(self, video_path: str) -> List[np.ndarray]:
         """Extract frames from video.
         
@@ -66,7 +67,8 @@ class DataPreprocessor:
         # Fallback to a sensible default if FPS could not be determined
         return float(fps if fps and fps > 0 else 25.0)
 
-    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[np.ndarray]:
+    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[
+        np.ndarray]:
         """Extract mel spectrogram using ffmpeg (PCM s16le) + librosa.
 
         Returns a numpy array [n_mels, time] in dB scale, or None on failure.
@@ -93,7 +95,7 @@ class DataPreprocessor:
             return S_dB.astype(np.float32)
         except Exception:
             return None
-    
+
     def detect_face(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """Detect face in frame.
         
@@ -106,16 +108,16 @@ class DataPreprocessor:
         detector_type = self.config["preprocessing"]["face_detection"]["detector"]
         min_face_size = self.config["preprocessing"]["face_detection"]["min_face_size"]
         margin = self.config["preprocessing"]["face_detection"]["margin"]
-        
+
         if detector_type == "dlib":
             landmarks = self.face_detector.get_landmarks(frame)
             if landmarks is None:
                 return None, None
-                
+
             landmarks = landmarks[0]
             x_min, y_min = landmarks.min(axis=0)
             x_max, y_max = landmarks.max(axis=0)
-            
+
         elif detector_type == "opencv":
             gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             faces = self.face_detector.detectMultiScale(
@@ -124,14 +126,14 @@ class DataPreprocessor:
                 minNeighbors=5,
                 minSize=(min_face_size, min_face_size)
             )
-            
+
             if len(faces) == 0:
                 return None, None
-                
+
             x, y, w, h = faces[0]
             x_min, y_min = x, y
             x_max, y_max = x + w, y + h
-        
+
         # Add margin
         width = x_max - x_min
         height = y_max - y_min
@@ -139,10 +141,10 @@ class DataPreprocessor:
         y_min = max(0, int(y_min - height * margin))
         x_max = min(frame.shape[1], int(x_max + width * margin))
         y_max = min(frame.shape[0], int(y_max + height * margin))
-        
+
         face = frame[y_min:y_max, x_min:x_max]
         return face, (x_min, y_min, x_max, y_max)
-    
+
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Preprocess a single frame.
         
@@ -156,14 +158,14 @@ class DataPreprocessor:
         face, bbox = self.detect_face(frame)
         if face is None:
             return None
-            
+
         # Resize to target size
         target_size = self.config["preprocessing"]["image_processing"]["target_size"]
         face = cv2.resize(face, target_size)
-        
+
         # Keep as uint8 for compact storage; defer normalization to loader
         return face
-    
+
     def process_video(self, video_path: str, label: int) -> Dict[str, Any]:
         """Process a single video.
         
@@ -177,14 +179,14 @@ class DataPreprocessor:
         # Extract frames and fps
         frames = self.extract_frames(video_path)
         fps = self.get_video_fps(video_path)
-        
+
         # Process frames
         processed_frames = []
         for frame in frames:
             processed_frame = self.preprocess_frame(frame)
             if processed_frame is not None:
                 processed_frames.append(processed_frame)
-        
+
         if not processed_frames:
             return None
 
@@ -217,63 +219,165 @@ class DataPreprocessor:
                 })
 
         return result
-    
+
+    @abstractmethod
     def process_dataset(self, input_dir: str, output_dir: str):
-        """Process entire dataset.
+        """Process entire dataset. Must be implemented by subclasses.
 
         Args:
             input_dir: Directory containing input videos
             output_dir: Directory to save processed data
         """
-        os.makedirs(output_dir, exist_ok=True)
+        pass
 
-        # Process videos
-        processed_data = []
-        for split in ["train", "val", "test"]:
-            split_dir = os.path.join(input_dir, split)
-            if not os.path.exists(split_dir):
-                continue
-
-            print(f"Processing {split} split...")
-            for video_file in tqdm(os.listdir(split_dir)):
-                if not video_file.endswith((".mp4", ".avi", ".mov")):
-                    continue
-
-                video_path = os.path.join(split_dir, video_file)
-                label = 1 if "fake" in video_file.lower() else 0
-
-                result = self.process_video(video_path, label)
-                if result is not None:
-                    processed_data.append(result)
-
-        # Save processed data to shards (assumed webdataset)
-        self._save_shards(processed_data, output_dir)
-
-    def _save_shards(self, data: List[Dict[str, Any]], output_dir: str):
-        """Save processed data to shard tar files (webdataset-compatible)."""
+    def _initialize_output_storage(self, output_dir: str):
+        """Initialize shards-only storage."""
         wds_cfg = self.config["output"]["webdataset"]
-        for split in ["train", "val", "test"]:
-            split_data = [d for d in data if d["metadata"]["video_path"].split(os.sep)[-2] == split]
-            if not split_data:
-                continue
-            split_output_dir = os.path.join(output_dir, split, "shards")
-            os.makedirs(split_output_dir, exist_ok=True)
+        shard_dir = os.path.join(output_dir, 'shards')
+        self.shard_writer = ShardWriter(
+            output_dir=shard_dir,
+            shard_prefix=wds_cfg.get("prefix", "shard"),
+            max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
+            image_codec=wds_cfg.get("image_codec", "webp"),
+            image_quality=int(wds_cfg.get("image_quality", 90)),
+            index_filename=wds_cfg.get("index_filename", "index.csv"),
+        )
 
-            writer = ShardWriter(
-                output_dir=split_output_dir,
-                shard_prefix=wds_cfg.get("prefix", "shard"),
-                max_shard_size_bytes=int(wds_cfg.get("max_shard_size_mb", 1024)) * 1024 * 1024,
-                image_codec=wds_cfg.get("image_codec", "webp"),
-                image_quality=int(wds_cfg.get("image_quality", 90)),
-                index_filename=wds_cfg.get("index_filename", "index.csv"),
-            )
-            print(f"Saving {len(split_data)} samples to shards in {split_output_dir}")
+    def _save_incremental(self, result: Dict[str, Any], output_dir: str):
+        """Save a single result incrementally (shards-only)."""
+        # Save as clip samples with optional aligned audio mel-spectrogram slices
+        wds_cfg = self.config["output"]["webdataset"]
+        clip_len = int(wds_cfg.get("clip_length", 16))
+        clip_stride = int(wds_cfg.get("clip_stride", clip_len))
+        frames: np.ndarray = result["data"]  # (T,H,W,3) uint8
+        label = int(result["label"])
+        meta_base = result["metadata"].copy()
+
+        t = frames.shape[0]
+        fps = float(meta_base.get("fps", 25.0))
+        audio_mel_full = result.get("audio_mel_full")  # [n_mels, time] float16 np.ndarray or None
+        audio_cfg = self.config.get("preprocessing", {}).get("audio_processing", {})
+        sr = int(audio_cfg.get("sample_rate", 16000))
+        hop = int(audio_cfg.get("hop_length", 512))
+
+        # If audio present, compute mapping from frame indices to mel frame indices via time
+        mel_per_second = sr / hop if hop > 0 else 0.0
+
+        start = 0
+        while start + clip_len <= t:
+            clip = frames[start:start + clip_len]
+            sample_id = f"{self.sample_index:06d}_{start:06d}"
+            meta = meta_base.copy()
+            meta["clip_start_frame"] = int(start)
+            meta["clip_length"] = int(clip_len)
+
+            mel_clip: np.ndarray | None = None
+            if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
+                # Time range for the clip in seconds
+                t0 = start / fps
+                t1 = (start + clip_len) / fps
+                # Map to mel frame indices
+                m0 = int(np.floor(t0 * mel_per_second))
+                m1 = int(np.ceil(t1 * mel_per_second))
+                m0 = max(0, m0)
+                m1 = min(audio_mel_full.shape[1], m1)
+                if m1 > m0:
+                    mel_clip = audio_mel_full[:, m0:m1]
+
+            self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
+            start += clip_stride
+        self.sample_index += 1
+
+    def _finalize_output_storage(self, output_dir: str):
+        """Finalize shards storage and save any remaining data."""
+        self.shard_writer.close()
+        # After writing shards and index.csv, generate stratified train/val index files
+        try:
+            self._stratified_split_webdataset_indexes(output_dir)
+        except Exception as e:
+            print(f"Warning: failed to create train/val indexes: {e}")
+
+    def _stratified_split_webdataset_indexes(self, output_dir: str) -> None:
+        """Create index_train.csv and index_val.csv stratified by label.
+
+        Uses data.train_split and data.val_split from config. The two ratios
+        are renormalized to sum to 1.0. Randomness is controlled by data.random_seed.
+        """
+        import random
+
+        shard_dir = os.path.join(output_dir, 'shards')
+        wds_cfg = self.config["output"]["webdataset"]
+        index_filename = wds_cfg.get("index_filename", "index.csv")
+        index_path = os.path.join(shard_dir, index_filename)
+
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"WebDataset index not found: {index_path}")
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            header = f.readline()
+            lines = [line.rstrip("\n") for line in f]
+
+        # Group by label (5th column: sample_id,shard,dir,num_frames,label,metadata)
+        by_label: Dict[int, List[str]] = {}
+        for line in lines:
+            parts = line.split(",", 5)
+            if len(parts) < 6:
+                continue
             try:
-                for i, item in enumerate(tqdm(split_data, desc=f"Saving {split} to shards")):
-                    sample_id = f"sample_{i:06d}"
-                    frames = item.get("data")
-                    label = int(item.get("label", 0))
-                    meta = item.get("metadata", {})
-                    writer.add_sample(sample_id, frames, label, meta)
-            finally:
-                writer.close()
+                label = int(parts[4])
+            except ValueError:
+                # Skip malformed line
+                continue
+            by_label.setdefault(label, []).append(line)
+
+        train_ratio_cfg = float(self.config["data"].get("train_split", 0.8))
+        val_ratio_cfg = float(self.config["data"].get("val_split", 0.2))
+        total = max(train_ratio_cfg + val_ratio_cfg, 1e-9)
+        train_ratio = train_ratio_cfg / total
+        val_ratio = val_ratio_cfg / total
+        seed = int(self.config["data"].get("random_seed", 42))
+        rng = random.Random(seed)
+
+        train_lines: List[str] = []
+        val_lines: List[str] = []
+        for _, group in by_label.items():
+            rng.shuffle(group)
+            n_val = int(round(len(group) * val_ratio))
+            val_lines.extend(group[:n_val])
+            train_lines.extend(group[n_val:])
+
+        # Write outputs
+        train_out = os.path.join(shard_dir, "index_train.csv")
+        val_out = os.path.join(shard_dir, "index_val.csv")
+        with open(train_out, "w", encoding="utf-8") as f:
+            f.write(header)
+            for line in train_lines:
+                f.write(line + "\n")
+        with open(val_out, "w", encoding="utf-8") as f:
+            f.write(header)
+            for line in val_lines:
+                f.write(line + "\n")
+        print(
+            f"Created stratified indexes: {os.path.basename(train_out)} ({len(train_lines)}), {os.path.basename(val_out)} ({len(val_lines)})")
+
+    def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
+        """Update statistics with metadata from a processed sample.
+        
+        Args:
+            stats: Current statistics dictionary
+            metadata: Metadata from processed sample
+        """
+        # This is a default implementation that can be overridden by subclasses
+        pass
+
+    def _save_dataset_statistics(self, stats: Dict[str, Any], output_dir: str):
+        """Save dataset statistics.
+        
+        Args:
+            stats: Statistics dictionary
+            output_dir: Directory to save statistics
+        """
+        import json
+        stats_path = os.path.join(output_dir, 'dataset_statistics.json')
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f, indent=2)
