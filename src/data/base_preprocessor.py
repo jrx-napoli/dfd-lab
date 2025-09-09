@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 from typing import Dict, Any, List, Tuple, Optional
@@ -7,9 +6,8 @@ import cv2
 import librosa
 # import face_alignment
 import numpy as np
-import torch
-import torchaudio
 from tqdm import tqdm
+
 from src.data.shard_writer import ShardWriter
 
 
@@ -68,22 +66,7 @@ class DataPreprocessor:
         # Fallback to a sensible default if FPS could not be determined
         return float(fps if fps and fps > 0 else 25.0)
 
-    def _extract_audio_waveform(self, video_path: str, target_sample_rate: int) -> Optional[torch.Tensor]:
-        """Extract mono audio waveform from a video using librosa only.
-
-        Returns a 1D float32 tensor of shape [num_samples] at target_sample_rate, or None on failure.
-        """
-        try:
-            if librosa is None:
-                return None
-            y_np, _ = librosa.load(video_path, sr=target_sample_rate, mono=True)
-            if y_np is None or y_np.size == 0:
-                return None
-            return torch.from_numpy(y_np.astype(np.float32, copy=False))
-        except Exception:
-            return None
-
-    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int, fmax: Optional[float]) -> Optional[np.ndarray]:
+    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[np.ndarray]:
         """Extract mel spectrogram using ffmpeg (PCM s16le) + librosa.
 
         Returns a numpy array [n_mels, time] in dB scale, or None on failure.
@@ -105,32 +88,11 @@ class DataPreprocessor:
             if y.size == 0:
                 return None
             mel_kwargs = {"y": y, "sr": sr, "n_mels": n_mels, "n_fft": n_fft, "hop_length": hop_length}
-            if fmax is not None:
-                mel_kwargs["fmax"] = fmax
             S = librosa.feature.melspectrogram(**mel_kwargs)
             S_dB = librosa.power_to_db(S, ref=np.max)
             return S_dB.astype(np.float32)
         except Exception:
             return None
-
-    def _compute_full_mel(self, waveform: torch.Tensor, sample_rate: int, n_mels: int, n_fft: int, hop_length: int) -> torch.Tensor:
-        """Compute full log-mel spectrogram for a mono waveform.
-
-        Returns tensor of shape [n_mels, num_frames].
-        """
-        # [1, T]
-        waveform = waveform.unsqueeze(0)
-        mel_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sample_rate,
-            n_fft=n_fft,
-            hop_length=hop_length,
-            n_mels=n_mels,
-            center=True,
-            power=2.0,
-        )
-        mel = mel_transform(waveform)  # [1, n_mels, time]
-        mel_db = torchaudio.transforms.AmplitudeToDB(stype="power")(mel)
-        return mel_db.squeeze(0)  # [n_mels, time]
     
     def detect_face(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """Detect face in frame.
@@ -243,15 +205,8 @@ class DataPreprocessor:
             n_mels = int(audio_cfg.get("n_mels", 80))
             n_fft = int(audio_cfg.get("n_fft", 2048))
             hop = int(audio_cfg.get("hop_length", 512))
-            fmax = None
-            # Optional fmax from config
-            fmax_cfg = self.config["preprocessing"].get("audio_processing", {}).get("fmax")
-            if fmax_cfg is not None:
-                try:
-                    fmax = float(fmax_cfg)
-                except Exception:
-                    fmax = None
-            mel_db = self._extract_audio_mel(video_path, sr, n_mels, n_fft, hop, fmax)
+            # Use librosa default upper frequency (Nyquist)
+            mel_db = self._extract_audio_mel(video_path, sr, n_mels, n_fft, hop)
             if mel_db is not None and mel_db.size > 0:
                 # Store as numpy float16 for compactness
                 result["audio_mel_full"] = mel_db.astype(np.float16)
@@ -265,35 +220,35 @@ class DataPreprocessor:
     
     def process_dataset(self, input_dir: str, output_dir: str):
         """Process entire dataset.
-        
+
         Args:
             input_dir: Directory containing input videos
             output_dir: Directory to save processed data
         """
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Process videos
         processed_data = []
         for split in ["train", "val", "test"]:
             split_dir = os.path.join(input_dir, split)
             if not os.path.exists(split_dir):
                 continue
-                
+
             print(f"Processing {split} split...")
             for video_file in tqdm(os.listdir(split_dir)):
                 if not video_file.endswith((".mp4", ".avi", ".mov")):
                     continue
-                    
+
                 video_path = os.path.join(split_dir, video_file)
                 label = 1 if "fake" in video_file.lower() else 0
-                
+
                 result = self.process_video(video_path, label)
                 if result is not None:
                     processed_data.append(result)
-        
+
         # Save processed data to shards (assumed webdataset)
         self._save_shards(processed_data, output_dir)
-    
+
     def _save_shards(self, data: List[Dict[str, Any]], output_dir: str):
         """Save processed data to shard tar files (webdataset-compatible)."""
         wds_cfg = self.config["output"]["webdataset"]
