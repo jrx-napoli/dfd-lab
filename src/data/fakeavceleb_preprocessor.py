@@ -148,7 +148,7 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
         self._finalize_output_storage(output_dir)
 
         # Save dataset statistics
-        self._save_dataset_statistics(stats, output_dir)
+        self.save_dataset_statistics(stats, output_dir)
 
     def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
         """Update statistics with metadata from a processed sample.

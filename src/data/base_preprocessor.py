@@ -38,7 +38,8 @@ class DataPreprocessor(ABC):
         else:
             raise ValueError(f"Unsupported face detector: {detector_type}")
 
-    def extract_frames(self, video_path: str) -> List[np.ndarray]:
+    @staticmethod
+    def extract_frames(video_path: str) -> List[np.ndarray]:
         """Extract frames from video.
         
         Args:
@@ -59,7 +60,8 @@ class DataPreprocessor(ABC):
         cap.release()
         return frames
 
-    def get_video_fps(self, video_path: str) -> float:
+    @staticmethod
+    def get_video_fps(video_path: str) -> float:
         """Get frames-per-second (FPS) of the input video."""
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
@@ -67,7 +69,8 @@ class DataPreprocessor(ABC):
         # Fallback to a sensible default if FPS could not be determined
         return float(fps if fps and fps > 0 else 25.0)
 
-    def _extract_audio_mel(self, video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[
+    @staticmethod
+    def extract_audio_mel(video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[
         np.ndarray]:
         """Extract mel spectrogram using ffmpeg (PCM s16le) + librosa.
 
@@ -208,7 +211,7 @@ class DataPreprocessor(ABC):
             n_fft = int(audio_cfg.get("n_fft", 2048))
             hop = int(audio_cfg.get("hop_length", 512))
             # Use librosa default upper frequency (Nyquist)
-            mel_db = self._extract_audio_mel(video_path, sr, n_mels, n_fft, hop)
+            mel_db = self.extract_audio_mel(video_path, sr, n_mels, n_fft, hop)
             if mel_db is not None and mel_db.size > 0:
                 # Store as numpy float16 for compactness
                 result["audio_mel_full"] = mel_db.astype(np.float16)
@@ -333,7 +336,6 @@ class DataPreprocessor(ABC):
         train_ratio_cfg = float(self.config["data"].get("train_split", 0.8))
         val_ratio_cfg = float(self.config["data"].get("val_split", 0.2))
         total = max(train_ratio_cfg + val_ratio_cfg, 1e-9)
-        train_ratio = train_ratio_cfg / total
         val_ratio = val_ratio_cfg / total
         seed = int(self.config["data"].get("random_seed", 42))
         rng = random.Random(seed)
@@ -370,7 +372,8 @@ class DataPreprocessor(ABC):
         # This is a default implementation that can be overridden by subclasses
         pass
 
-    def _save_dataset_statistics(self, stats: Dict[str, Any], output_dir: str):
+    @staticmethod
+    def save_dataset_statistics(stats: Dict[str, Any], output_dir: str):
         """Save dataset statistics.
         
         Args:
