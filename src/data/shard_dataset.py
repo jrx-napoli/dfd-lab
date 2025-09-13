@@ -22,7 +22,8 @@ def _decode_image(buf: bytes) -> np.ndarray:
 class ShardClipDataset(IterableDataset):
     """Streams tar shards of samples (directories) with frames and meta.json.
 
-    Each yielded item is a dict: {"data": Tensor[T,H,W,3], "label": int, "metadata": dict}
+    Each yielded item is a dict: {"data": Tensor[T,H,W,3], "label": int, "metadata": dict, "audio_mel_frames": Tensor[T,n_mels,mel_frames_per_frame]}
+    The audio_mel_frames key is only present if audio processing was enabled during preprocessing.
     Normalization can be applied downstream using existing LMDBDataTransform if desired.
     """
 
@@ -86,31 +87,31 @@ class ShardClipDataset(IterableDataset):
                     meta["id"] = sample_id
                     meta["num_frames"] = num_frames
 
-                    # Optional audio mel features
-                    mel_tensor = None
-                    mel_shape_member = members.get(f"{sample_dir}/audio_mel.json")
-                    mel_data_member = members.get(f"{sample_dir}/audio_mel.f16")
-                    if mel_shape_member is not None and mel_data_member is not None:
+                    # Optional audio mel features (frame-level)
+                    mel_frames_tensor = None
+                    mel_frames_shape_member = members.get(f"{sample_dir}/audio_mel_frames.json")
+                    mel_frames_data_member = members.get(f"{sample_dir}/audio_mel_frames.f16")
+                    if mel_frames_shape_member is not None and mel_frames_data_member is not None:
                         try:
-                            shape_info = json.loads(tar.extractfile(mel_shape_member).read().decode("utf-8"))
-                            arr_bytes = tar.extractfile(mel_data_member).read()
+                            shape_info = json.loads(tar.extractfile(mel_frames_shape_member).read().decode("utf-8"))
+                            arr_bytes = tar.extractfile(mel_frames_data_member).read()
                             shape = shape_info.get("shape", [])
-                            if isinstance(shape, list) and len(shape) == 2:
-                                mels, time_len = int(shape[0]), int(shape[1])
+                            if isinstance(shape, list) and len(shape) == 3:
+                                frames, mels, mel_frames_per_frame = int(shape[0]), int(shape[1]), int(shape[2])
                                 arr = np.frombuffer(arr_bytes, dtype=np.float16)
-                                if arr.size == mels * time_len:
-                                    mel_np = arr.reshape(mels, time_len)
-                                    mel_tensor = torch.from_numpy(mel_np)
+                                if arr.size == frames * mels * mel_frames_per_frame:
+                                    mel_frames_np = arr.reshape(frames, mels, mel_frames_per_frame)
+                                    mel_frames_tensor = torch.from_numpy(mel_frames_np)
                         except Exception:
-                            mel_tensor = None
+                            mel_frames_tensor = None
 
                     sample = {
                         "data": torch.from_numpy(data).to(self.target_device),
                         "label": label,
                         "metadata": meta,
                     }
-                    if mel_tensor is not None:
-                        sample["audio_mel"] = mel_tensor
+                    if mel_frames_tensor is not None:
+                        sample["audio_mel_frames"] = mel_frames_tensor
 
                     yield sample
 

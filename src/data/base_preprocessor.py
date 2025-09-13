@@ -5,7 +5,6 @@ from typing import Dict, Any, List, Tuple, Optional
 
 import cv2
 import librosa
-# import face_alignment
 import numpy as np
 
 from src.data.shard_writer import ShardWriter
@@ -21,30 +20,30 @@ class DataPreprocessor(ABC):
             config: Configuration dictionary containing preprocessing parameters
         """
         self.config = config
-        self.face_detector = self._initialize_face_detector()
+        self.face_detector = self.initialize_face_detector()
         self.sample_index = 0
 
-    def _initialize_face_detector(self):
-        """Initialize face detector based on configuration."""
-        detector_type = self.config["preprocessing"]["face_detection"]["detector"]
-        # if detector_type == "dlib":
-        #     return face_alignment.FaceAlignment(
-        #         face_alignment.LandmarksType._2D,
-        #         flip_input=False,
-        #         device="cuda" if torch.cuda.is_available() else "cpu"
-        #     )
-        if detector_type == "opencv":
-            return cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        else:
-            raise ValueError(f"Unsupported face detector: {detector_type}")
+    @staticmethod
+    def initialize_face_detector():
+        """Initialize OpenCV face detector."""
+        return cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+    @staticmethod
+    def get_video_fps(video_path: str) -> float:
+        """Get frames-per-second (FPS) of the input video."""
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        cap.release()
+        # Fallback to a sensible default if FPS could not be determined
+        return float(fps if fps and fps > 0 else 25.0)
 
     @staticmethod
     def extract_frames(video_path: str) -> List[np.ndarray]:
         """Extract frames from video.
-        
+
         Args:
             video_path: Path to the video file
-            
+
         Returns:
             List of extracted frames
         """
@@ -59,15 +58,6 @@ class DataPreprocessor(ABC):
 
         cap.release()
         return frames
-
-    @staticmethod
-    def get_video_fps(video_path: str) -> float:
-        """Get frames-per-second (FPS) of the input video."""
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-        cap.release()
-        # Fallback to a sensible default if FPS could not be determined
-        return float(fps if fps and fps > 0 else 25.0)
 
     @staticmethod
     def extract_audio_mel(video_path: str, sr: int, n_mels: int, n_fft: int, hop_length: int) -> Optional[
@@ -99,83 +89,90 @@ class DataPreprocessor(ABC):
         except Exception:
             return None
 
-    def detect_face(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-        """Detect face in frame.
-        
+    @staticmethod
+    def extract_frame_level_mel(
+            audio_mel_full: np.ndarray,
+            start_frame: int,
+            clip_len: int,
+            fps: float,
+            mel_per_second: float
+    ) -> np.ndarray:
+        """Extract mel spectrograms for each frame in the clip.
+
         Args:
-            frame: Input frame
-            
+            audio_mel_full: Full mel spectrogram [n_mels, time_frames]
+            start_frame: Starting frame index in the video
+            clip_len: Number of frames in the clip
+            fps: Frames per second of the video
+            mel_per_second: Mel frames per second
+
         Returns:
-            Tuple of (cropped face, bounding box)
+            Frame-level mel spectrograms [clip_len, n_mels, mel_frames_per_frame]
         """
-        detector_type = self.config["preprocessing"]["face_detection"]["detector"]
-        min_face_size = self.config["preprocessing"]["face_detection"]["min_face_size"]
-        margin = self.config["preprocessing"]["face_detection"]["margin"]
+        n_mels = audio_mel_full.shape[0]
+        mel_frames_per_frame = max(1, int(round(mel_per_second / fps)))
 
-        if detector_type == "dlib":
-            landmarks = self.face_detector.get_landmarks(frame)
-            if landmarks is None:
-                return None, None
+        # Initialize output array for frame-level mel spectrograms
+        mel_frames = np.zeros((clip_len, n_mels, mel_frames_per_frame), dtype=np.float16)
 
-            landmarks = landmarks[0]
-            x_min, y_min = landmarks.min(axis=0)
-            x_max, y_max = landmarks.max(axis=0)
+        for i in range(clip_len):
+            frame_idx = start_frame + i
+            # Calculate time for this frame
+            frame_time = frame_idx / fps
+            # Map to mel spectrogram indices
+            mel_start = int(np.floor(frame_time * mel_per_second))
+            mel_end = mel_start + mel_frames_per_frame
 
-        elif detector_type == "opencv":
-            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-            faces = self.face_detector.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(min_face_size, min_face_size)
-            )
+            # Ensure bounds
+            mel_start = max(0, mel_start)
+            mel_end = min(audio_mel_full.shape[1], mel_end)
 
-            if len(faces) == 0:
-                return None, None
+            if mel_end > mel_start:
+                # Extract mel spectrogram for this frame
+                mel_frame = audio_mel_full[:, mel_start:mel_end]
+                # Pad or truncate to ensure consistent shape
+                if mel_frame.shape[1] < mel_frames_per_frame:
+                    # Pad with zeros
+                    pad_width = mel_frames_per_frame - mel_frame.shape[1]
+                    mel_frame = np.pad(mel_frame, ((0, 0), (0, pad_width)), mode='constant', constant_values=0)
+                elif mel_frame.shape[1] > mel_frames_per_frame:
+                    # Truncate
+                    mel_frame = mel_frame[:, :mel_frames_per_frame]
 
-            x, y, w, h = faces[0]
-            x_min, y_min = x, y
-            x_max, y_max = x + w, y + h
+                mel_frames[i] = mel_frame.astype(np.float16)
 
-        # Add margin
-        width = x_max - x_min
-        height = y_max - y_min
-        x_min = max(0, int(x_min - width * margin))
-        y_min = max(0, int(y_min - height * margin))
-        x_max = min(frame.shape[1], int(x_max + width * margin))
-        y_max = min(frame.shape[0], int(y_max + height * margin))
+        return mel_frames
 
-        face = frame[y_min:y_max, x_min:x_max]
-        return face, (x_min, y_min, x_max, y_max)
+    @staticmethod
+    def save_dataset_statistics(stats: Dict[str, Any], output_dir: str):
+        """Save dataset statistics.
 
-    def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Preprocess a single frame.
-        
         Args:
-            frame: Input frame
-            
-        Returns:
-            Preprocessed frame
+            stats: Statistics dictionary
+            output_dir: Directory to save statistics
         """
-        # Detect and crop face
-        face, bbox = self.detect_face(frame)
-        if face is None:
-            return None
+        import json
+        stats_path = os.path.join(output_dir, 'dataset_statistics.json')
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f, indent=2)
 
-        # Resize to target size
-        target_size = self.config["preprocessing"]["image_processing"]["target_size"]
-        face = cv2.resize(face, target_size)
+    @abstractmethod
+    def process_dataset(self, input_dir: str, output_dir: str):
+        """Process entire dataset. Must be implemented by subclasses.
 
-        # Keep as uint8 for compact storage; defer normalization to loader
-        return face
+        Args:
+            input_dir: Directory containing input videos
+            output_dir: Directory to save processed data
+        """
+        pass
 
     def process_video(self, video_path: str, label: int) -> Dict[str, Any]:
         """Process a single video.
-        
+
         Args:
             video_path: Path to the video file
             label: Label of the video (0 for real, 1 for fake)
-            
+
         Returns:
             Dictionary containing processed data and metadata
         """
@@ -186,7 +183,7 @@ class DataPreprocessor(ABC):
         # Process frames
         processed_frames = []
         for frame in frames:
-            processed_frame = self.preprocess_frame(frame)
+            processed_frame = self._preprocess_frame(frame)
             if processed_frame is not None:
                 processed_frames.append(processed_frame)
 
@@ -223,15 +220,43 @@ class DataPreprocessor(ABC):
 
         return result
 
-    @abstractmethod
-    def process_dataset(self, input_dir: str, output_dir: str):
-        """Process entire dataset. Must be implemented by subclasses.
+    def _detect_face(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """Detect face in frame using OpenCV.
 
         Args:
-            input_dir: Directory containing input videos
-            output_dir: Directory to save processed data
+            frame: Input frame
+
+        Returns:
+            Tuple of (cropped face, bounding box)
         """
-        pass
+        min_face_size = self.config["preprocessing"]["face_detection"]["min_face_size"]
+        margin = self.config["preprocessing"]["face_detection"]["margin"]
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        faces = self.face_detector.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(min_face_size, min_face_size)
+        )
+
+        if len(faces) == 0:
+            return None, None
+
+        x, y, w, h = faces[0]
+        x_min, y_min = x, y
+        x_max, y_max = x + w, y + h
+
+        # Add margin
+        width = x_max - x_min
+        height = y_max - y_min
+        x_min = max(0, int(x_min - width * margin))
+        y_min = max(0, int(y_min - height * margin))
+        x_max = min(frame.shape[1], int(x_max + width * margin))
+        y_max = min(frame.shape[0], int(y_max + height * margin))
+
+        face = frame[y_min:y_max, x_min:x_max]
+        return face, (x_min, y_min, x_max, y_max)
 
     def _initialize_output_storage(self, output_dir: str):
         """Initialize shards-only storage."""
@@ -246,9 +271,30 @@ class DataPreprocessor(ABC):
             index_filename=wds_cfg.get("index_filename", "index.csv"),
         )
 
+    def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Preprocess a single frame.
+
+        Args:
+            frame: Input frame
+
+        Returns:
+            Preprocessed frame
+        """
+        # Detect and crop face
+        face, bbox = self._detect_face(frame)
+        if face is None:
+            return None
+
+        # Resize to target size
+        target_size = self.config["preprocessing"]["image_processing"]["target_size"]
+        face = cv2.resize(face, target_size)
+
+        # Keep as uint8 for compact storage; defer normalization to loader
+        return face
+
     def _save_incremental(self, result: Dict[str, Any], output_dir: str):
         """Save a single result incrementally (shards-only)."""
-        # Save as clip samples with optional aligned audio mel-spectrogram slices
+        # Save as clip samples with frame-level audio mel-spectrograms
         wds_cfg = self.config["output"]["webdataset"]
         clip_len = int(wds_cfg.get("clip_length", 16))
         clip_stride = int(wds_cfg.get("clip_stride", clip_len))
@@ -274,20 +320,14 @@ class DataPreprocessor(ABC):
             meta["clip_start_frame"] = int(start)
             meta["clip_length"] = int(clip_len)
 
-            mel_clip: np.ndarray | None = None
+            # Extract frame-level mel spectrograms
+            mel_frames: np.ndarray | None = None
             if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
-                # Time range for the clip in seconds
-                t0 = start / fps
-                t1 = (start + clip_len) / fps
-                # Map to mel frame indices
-                m0 = int(np.floor(t0 * mel_per_second))
-                m1 = int(np.ceil(t1 * mel_per_second))
-                m0 = max(0, m0)
-                m1 = min(audio_mel_full.shape[1], m1)
-                if m1 > m0:
-                    mel_clip = audio_mel_full[:, m0:m1]
+                mel_frames = self.extract_frame_level_mel(
+                    audio_mel_full, start, clip_len, fps, mel_per_second
+                )
 
-            self.shard_writer.add_sample(sample_id, clip, label, meta, mel_clip=mel_clip)
+            self.shard_writer.add_sample(sample_id, clip, label, meta, mel_frames=mel_frames)
             start += clip_stride
         self.sample_index += 1
 
@@ -364,23 +404,10 @@ class DataPreprocessor(ABC):
 
     def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
         """Update statistics with metadata from a processed sample.
-        
+
         Args:
             stats: Current statistics dictionary
             metadata: Metadata from processed sample
         """
         # This is a default implementation that can be overridden by subclasses
         pass
-
-    @staticmethod
-    def save_dataset_statistics(stats: Dict[str, Any], output_dir: str):
-        """Save dataset statistics.
-        
-        Args:
-            stats: Statistics dictionary
-            output_dir: Directory to save statistics
-        """
-        import json
-        stats_path = os.path.join(output_dir, 'dataset_statistics.json')
-        with open(stats_path, 'w') as f:
-            json.dump(stats, f, indent=2)

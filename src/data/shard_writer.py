@@ -100,7 +100,7 @@ class ShardWriter:
         label: int,
         sample_metadata: Dict[str, Any],
         *,
-        mel_clip: np.ndarray | None = None,
+        mel_frames: np.ndarray | None = None,
     ) -> None:
         """Add a sample consisting of frames and metadata.
 
@@ -109,6 +109,7 @@ class ShardWriter:
             frames_rgb: uint8 array (T,H,W,3) RGB
             label: class label
             sample_metadata: dict merged into meta.json
+            mel_frames: optional frame-level mel spectrograms [T, n_mels, mel_frames_per_frame]
         """
         assert frames_rgb.dtype == np.uint8 and frames_rgb.ndim == 4 and frames_rgb.shape[-1] == 3
 
@@ -122,11 +123,11 @@ class ShardWriter:
 
         # Account for mel size in estimate if provided
         estimated_size, buffers, ext = self._estimate_sample_size(frames_rgb, meta)
-        if mel_clip is not None:
-            # store mel as float16 npy serialized bytes
-            mel_bytes = mel_clip.astype(np.float16).tobytes(order="C")
+        if mel_frames is not None:
+            # store frame-level mel as float16 npy serialized bytes
+            mel_frames_bytes = mel_frames.astype(np.float16).tobytes(order="C")
             # add small header estimate for shape/metadata json
-            estimated_size += len(mel_bytes) + 128
+            estimated_size += len(mel_frames_bytes) + 128
 
         # Rotate shard if needed
         if self._bytes_written + estimated_size > self.max_shard_size_bytes:
@@ -152,24 +153,24 @@ class ShardWriter:
         self._tar.addfile(info, io.BytesIO(meta_bytes))
         self._bytes_written += info.size
 
-        # Write mel spectrogram if available
-        if mel_clip is not None:
+        # Write frame-level mel spectrograms if available
+        if mel_frames is not None:
             # Save raw float16 binary and separate shape json for compactness
-            mel_arr = mel_clip.astype(np.float16, copy=False)
-            mel_raw = mel_arr.tobytes(order="C")
-            # mel.bin
-            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel.f16")
-            info.size = len(mel_raw)
+            mel_frames_arr = mel_frames.astype(np.float16, copy=False)
+            mel_frames_raw = mel_frames_arr.tobytes(order="C")
+            # mel_frames.bin
+            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel_frames.f16")
+            info.size = len(mel_frames_raw)
             info.mtime = mtime
-            self._tar.addfile(info, io.BytesIO(mel_raw))
+            self._tar.addfile(info, io.BytesIO(mel_frames_raw))
             self._bytes_written += info.size
-            # mel shape
-            mel_shape = {"shape": list(mel_arr.shape), "dtype": "float16", "layout": "[mels,time]"}
-            mel_shape_bytes = json.dumps(mel_shape).encode("utf-8")
-            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel.json")
-            info.size = len(mel_shape_bytes)
+            # mel_frames shape
+            mel_frames_shape = {"shape": list(mel_frames_arr.shape), "dtype": "float16", "layout": "[frames,mels,mel_frames_per_frame]"}
+            mel_frames_shape_bytes = json.dumps(mel_frames_shape).encode("utf-8")
+            info = tarfile.TarInfo(name=f"{sample_dir}/audio_mel_frames.json")
+            info.size = len(mel_frames_shape_bytes)
             info.mtime = mtime
-            self._tar.addfile(info, io.BytesIO(mel_shape_bytes))
+            self._tar.addfile(info, io.BytesIO(mel_frames_shape_bytes))
             self._bytes_written += info.size
 
         # Append to index
