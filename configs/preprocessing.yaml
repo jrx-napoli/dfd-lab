@@ -15,12 +15,6 @@ preprocessing:
     normalization:
       mean: [ 0.485, 0.456, 0.406 ]  # ImageNet mean
       std: [ 0.229, 0.224, 0.225 ]   # ImageNet std
-    augmentations:
-      enabled: true
-      horizontal_flip: true
-      rotation_range: 15
-      brightness_range: [ 0.8, 1.2 ]
-      contrast_range: [ 0.8, 1.2 ]
 
   audio_processing:
     enabled: true
@@ -30,14 +24,12 @@ preprocessing:
     hop_length: 256
 
 output:
-  batch_size: 100
-
   # WebDataset configuration
   webdataset:
     prefix: "shard"
     max_shard_size_mb: 1024
     image_codec: "webp"     # "webp" or "jpeg"
-    image_quality: 90        # 1..100
+    image_quality: 90        # 1-100
     index_filename: "index.csv"
     clip_length: 16
     clip_stride: 8
