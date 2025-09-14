@@ -191,17 +191,17 @@ class Trainer:
         target_np = target.cpu().numpy()
         
         # Update each metric
-        for metric in metrics:
-            if metric == "accuracy":
-                metrics[metric] += (pred_np == target_np).mean()
-            elif metric == "precision":
-                metrics[metric] += precision_score(target_np, pred_np, average="binary")
-            elif metric == "recall":
-                metrics[metric] += recall_score(target_np, pred_np, average="binary")
-            elif metric == "f1_score":
-                metrics[metric] += f1_score(target_np, pred_np, average="binary")
-            elif metric == "auc_roc":
-                metrics[metric] += roc_auc_score(target_np, pred_np)
+        # for metric in metrics:
+        #     if metric == "accuracy":
+        #         metrics[metric] += (pred_np == target_np).mean()
+        #     elif metric == "precision":
+        #         metrics[metric] += precision_score(target_np, pred_np, average="binary")
+        #     elif metric == "recall":
+        #         metrics[metric] += recall_score(target_np, pred_np, average="binary")
+        #     elif metric == "f1_score":
+        #         metrics[metric] += f1_score(target_np, pred_np, average="binary")
+        #     elif metric == "auc_roc":
+        #         metrics[metric] += roc_auc_score(target_np, pred_np)
     
     def train(self):
         """Train the model."""
