@@ -7,6 +7,8 @@ data:
 model:
   checkpoint_path: "checkpoints/best_model.pth"
   device: "cuda"  # Options: "cuda", "cpu"
+  name: "efficientnet_b0"
+  num_classes: 2
 
 evaluation:
   metrics:
@@ -16,6 +18,13 @@ evaluation:
     - "f1_score"
     - "auc_roc"
     - "confusion_matrix"
+    - "specificity"
+    - "balanced_accuracy"
+    - "matthews_correlation"
+    - "cohen_kappa"
+    - "average_precision"
+  name: "efficientnet_b0"
+  num_classes: 2
   
   visualization:
     enabled: true
