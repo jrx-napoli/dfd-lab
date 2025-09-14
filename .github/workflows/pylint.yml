@@ -24,7 +24,7 @@ jobs:
 
       # 4. Install project + dev dependencies (including pylint)
       - name: Sync dependencies
-        run: uv sync --only-group --dev
+        run: uv sync --only-group dev
 
       # 5. Run pylint
       - name: Run pylint
