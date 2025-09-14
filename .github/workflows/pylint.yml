@@ -28,4 +28,4 @@ jobs:
 
       # 5. Run pylint
       - name: Run pylint
-        run: uv run pylint $(git ls-files '*.py')
+        run: uv run --only-group dev pylint $(git ls-files '*.py')
