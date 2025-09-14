@@ -26,7 +26,7 @@ def main():
         config = yaml.safe_load(f)
 
     input_dir = config["data"]["input_dir"]
-        output_dir = config["data"]["output_dir"]
+    output_dir = config["data"]["output_dir"]
 
     # Create preprocessor based on dataset
     if args.dataset == "fakeavceleb":
