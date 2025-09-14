@@ -190,7 +190,7 @@ class Trainer:
         pred_np = pred.cpu().numpy()
         target_np = target.cpu().numpy()
         
-        Update each metric
+        # Update each metric
         for metric in metrics:
             if metric == "accuracy":
                 metrics[metric] += (pred_np == target_np).mean()
