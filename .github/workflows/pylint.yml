@@ -28,4 +28,4 @@ jobs:
 
       # 5. Run pylint
       - name: Run pylint
-        run: uv run --only-group dev pylint --exit-zero --fail-on=E $(git ls-files '*.py')
+        run: uv run --only-group dev pylint --fail-on=E $(git ls-files '*.py')
