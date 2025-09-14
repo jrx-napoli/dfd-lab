@@ -1,0 +1,31 @@
+name: Pylint
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 3. Install uv
+      - name: Install uv
+        run: pip install uv
+
+      # 4. Install project + dev dependencies (including pylint)
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      # 5. Run pylint
+      - name: Run pylint
+        run: uv run pylint $(git ls-files '*.py')
