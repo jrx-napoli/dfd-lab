@@ -21,41 +21,41 @@ class XceptionMaxFusionDetector(BaseDetector):
         self.audio_model = timm.create_model('xception', pretrained=True, num_classes=num_classes, in_chans=1)
 
     def forward(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
-    """
-    Forward pass of the XceptionMaxFusionDetector.
+        """
+        Forward pass of the XceptionMaxFusionDetector.
 
-    Args:
-        image_input (torch.Tensor): (B, T, 3, H, W) video frames
-        audio_input (torch.Tensor): (B, T, 1, H, W) spectrogram frames
+        Args:
+            image_input (torch.Tensor): (B, T, 3, H, W) video frames
+            audio_input (torch.Tensor): (B, T, 1, H, W) spectrogram frames
 
-    Returns:
-        torch.Tensor: (B, num_classes) fused logits
-    """
-    # Check input ranks
-    if image_input.ndim != 5 or audio_input.ndim != 5:
-        raise ValueError("Inputs must have shape (B, T, C, H, W)")
+        Returns:
+            torch.Tensor: (B, num_classes) fused logits
+        """
+        # Check input ranks
+        if image_input.ndim != 5 or audio_input.ndim != 5:
+            raise ValueError("Inputs must have shape (B, T, C, H, W)")
 
-    B, T, C_v, H, W = image_input.shape
-    _, _, C_a, _, _ = audio_input.shape  # just for clarity
+        B, T, C_v, H, W = image_input.shape
+        _, _, C_a, _, _ = audio_input.shape  # just for clarity
 
-    # Reshape: process all frames at once
-    video_reshaped = image_input.view(B * T, C_v, H, W)   # (B*T, 3, H, W)
-    audio_reshaped = audio_input.view(B * T, C_a, H, W)   # (B*T, 1, H, W)
+        # Reshape: process all frames at once
+        video_reshaped = image_input.view(B * T, C_v, H, W)   # (B*T, 3, H, W)
+        audio_reshaped = audio_input.view(B * T, C_a, H, W)   # (B*T, 1, H, W)
 
-    # Forward through backbones
-    video_logits = self.video_model(video_reshaped)   # (B*T, num_classes)
-    audio_logits = self.audio_model(audio_reshaped)   # (B*T, num_classes)
+        # Forward through backbones
+        video_logits = self.video_model(video_reshaped)   # (B*T, num_classes)
+        audio_logits = self.audio_model(audio_reshaped)   # (B*T, num_classes)
 
-    # Late fusion (elementwise max across modalities)
-    fused_logits = torch.max(video_logits, audio_logits)  # (B*T, num_classes)
+        # Late fusion (elementwise max across modalities)
+        fused_logits = torch.max(video_logits, audio_logits)  # (B*T, num_classes)
 
-    # Reshape back into sequence format
-    fused_logits = fused_logits.view(B, T, self.num_classes)
+        # Reshape back into sequence format
+        fused_logits = fused_logits.view(B, T, self.num_classes)
 
-    # Temporal pooling across frames (max-pooling)
-    final_logits, _ = fused_logits.max(dim=1)  # (B, num_classes)
+        # Temporal pooling across frames (max-pooling)
+        final_logits, _ = fused_logits.max(dim=1)  # (B, num_classes)
 
-    return final_logits
+        return final_logits
 
     def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
         """Get model predictions (single class) for multi-modal input.
