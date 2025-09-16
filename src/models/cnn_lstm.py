@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.nn.utils.rnn import pack_padded_sequence
 from typing import Tuple, Optional
 from base import BaseDetector
 
@@ -48,29 +47,23 @@ class CNNLSTMDetector(BaseDetector):
 
         self.fc = nn.Linear(hidden_size, num_classes)
 
-    def forward(self, image_input: Optional[torch.Tensor], audio_input: Optional[torch.Tensor]) -> torch.Tensor:
-    # Prepare image features
-    B, T, C_vid, H, W = image_input.shape
-    device = image_input.device
-    img_flat = image_input.view(B * T, C_vid, H, W)
-    img_feats = self.video_cnn(img_flat).view(B, T, -1)  # (B, T, D_img)
-
-    # Prepare audio features
-    _, _, C_aud, _, _ = audio_input.shape
-    device = audio_input.device
-    aud_flat = audio_input.view(B * T, C_aud, H, W)
-    aud_feats = self.audio_cnn(aud_flat).view(B, T, -1)  # (B, T, D_aud)
-
-    # Fuse modalities
-    fused_feats = torch.cat([img_feats, aud_feats], dim=-1)  # (B, T, D_img + D_aud)
-
-    # LSTM
-    lstm_out, (h_n, _) = self.lstm(fused_feats)  # lstm_out: (B, T, H_lstm)
-    last_hidden = h_n[-1]  # (B, H_lstm)
-
-    # Classifier
-    logits = self.fc(last_hidden)  # (B, num_classes)
-    return logits
+    def forward(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
+        B, T, C_vid, H, W = image_input.shape
+        _, _, C_aud, _, _ = audio_input.shape
+        
+        img_flat = image_input.view(B * T, C_vid, H, W)
+        img_feats = self.video_cnn(img_flat).view(B, T, -1)
+        
+        aud_flat = audio_input.view(B * T, C_aud, H, W)
+        aud_feats = self.audio_cnn(aud_flat).view(B, T, -1)
+        
+        fused_feats = torch.cat([img_feats, aud_feats], dim=-1)
+        
+        lstm_out, (h_n, _) = self.lstm(fused_feats)
+        last_hidden = h_n[-1]
+        
+        logits = self.fc(last_hidden)
+        return logits
 
     def predict(self, image_input: torch.Tensor, audio_input: torch.Tensor) -> torch.Tensor:
         self.eval()
@@ -94,42 +87,27 @@ class CNNLSTMDetector(BaseDetector):
         return video_features, audio_features
 
     def get_video_features(self, image_input: torch.Tensor) -> torch.Tensor:
-    B, T, C, H, W = image_input.shape
+        B, T, C, H, W = image_input.shape
+        
+        video_flat = image_input.view(B * T, C, H, W)
+        features = self.video_cnn(video_flat)
+        features = features.view(B, T, -1)
+        final_features = features.mean(dim=1)
+        
+        return final_features
 
-    # Flatten frames
-    video_flat = image_input.view(B * T, C, H, W)
-
-    # CNN features
-    features = self.video_cnn(video_flat)  # (B*T, feature_dim)
-
-    # Reshape back to sequence
-    features = features.view(B, T, -1)  # (B, T, feature_dim)
-
-    # Aggregate across frames (mean pooling)
-    final_features = features.mean(dim=1)  # (B, feature_dim)
-
-    return final_features
-
-def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
-    B, T, C, H, W = audio_input.shape
-
-    # Flatten frames
-    audio_flat = audio_input.view(B * T, C, H, W)
-
-    # CNN features
-    features = self.audio_cnn(audio_flat)  # (B*T, feature_dim)
-
-    # Reshape back to sequence
-    features = features.view(B, T, -1)  # (B, T, feature_dim)
-
-    # Aggregate across frames (mean pooling)
-    final_features = features.mean(dim=1)  # (B, feature_dim)
-
-    return final_features
+    def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
+        B, T, C, H, W = audio_input.shape
+        
+        audio_flat = audio_input.view(B * T, C, H, W)
+        features = self.audio_cnn(audio_flat)
+        features = features.view(B, T, -1)
+        final_features = features.mean(dim=1)
+        
+        return final_features
 
     def predict_single_modality(self, image_input: Optional[torch.Tensor] = None, 
                                 audio_input: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Get predictions using only one modality (for ablation studies or single-modality inference). """
         if image_input is not None and audio_input is not None:
             raise ValueError("Only one modality can be provided at a time")
         
@@ -139,39 +117,28 @@ def get_audio_features(self, audio_input: torch.Tensor) -> torch.Tensor:
         self.eval()
         with torch.no_grad():
             if image_input is not None:
-                batch_size, num_frames, C, H, W = image_input.shape
+                B, T, C, H, W = image_input.shape
                 device = image_input.device
                 
-                # Get video features
-                img_flat = image_input.view(batch_size * num_frames, C, H, W)
-                img_feats = self.video_cnn(img_flat).view(batch_size, num_frames, -1)  # (B, T, D_img)
-                
-                # Create zero audio features to match the expected input dimension
-                aud_feats = torch.zeros(batch_size, num_frames, self.audio_cnn.out_dim, device=device)
+                img_flat = image_input.view(B * T, C, H, W)
+                img_feats = self.video_cnn(img_flat).view(B, T, -1)
+                aud_feats = torch.zeros(B, T, self.audio_cnn.out_dim, device=device)
 
             elif audio_input is not None:
-                batch_size, num_frames, C, H, W = audio_input.shape
+                B, T, C, H, W = audio_input.shape
                 device = audio_input.device
                 
-                # Get audio features
-                aud_flat = audio_input.view(batch_size * num_frames, C, H, W)
-                aud_feats = self.audio_cnn(aud_flat).view(batch_size, num_frames, -1)  # (B, T, D_aud)
-                
-                # Create zero video features to match the expected input dimension
-                img_feats = torch.zeros(batch_size, num_frames, self.video_cnn.out_dim, device=device)
+                aud_flat = audio_input.view(B * T, C, H, W)
+                aud_feats = self.audio_cnn(aud_flat).view(B, T, -1)
+                img_feats = torch.zeros(B, T, self.video_cnn.out_dim, device=device)
 
-            # Fuse features (concatenation) - one modality will be zeros
-            fused_feats = torch.cat([img_feats, aud_feats], dim=-1)  # (B, T, D_img + D_aud)
-
-            # LSTM
+            fused_feats = torch.cat([img_feats, aud_feats], dim=-1)
+            
             _, (h_n, _) = self.lstm(fused_feats)
-            last_hidden = h_n[-1]  # (B, H_lstm)
+            last_hidden = h_n[-1]
             
-            # Classifier
-            logits = self.fc(last_hidden)  # (B, num_classes)
-            
-            # Prediction
+            logits = self.fc(last_hidden)
             probabilities = torch.softmax(logits, dim=1)
-            predictions = torch.argmax(probabilities, dim=1)  # (B,)
+            predictions = torch.argmax(probabilities, dim=1)
             
             return predictions
