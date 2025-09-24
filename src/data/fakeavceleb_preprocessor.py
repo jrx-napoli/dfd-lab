@@ -144,10 +144,7 @@ class FakeAVCelebPreprocessor(DataPreprocessor):
                     print(f"\nError processing {video_path}: {str(e)}")
                     continue
 
-        # Finalize output storage
         self._finalize_output_storage(output_dir)
-
-        # Save dataset statistics
         self.save_dataset_statistics(stats, output_dir)
 
     def _update_statistics(self, stats: Dict[str, Any], metadata: Dict[str, Any]):
