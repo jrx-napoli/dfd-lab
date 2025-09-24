@@ -30,3 +30,8 @@ torchaudio = [
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "pylint>=3.3.8",
+]
