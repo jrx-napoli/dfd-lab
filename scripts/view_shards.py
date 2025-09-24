@@ -46,7 +46,7 @@ def play_clip(clip: torch.Tensor, title: str, fps: int = 20) -> None:
     for i, frame in enumerate(clip_np):
         frame = frame.astype(np.uint8)
         bgr = to_bgr(frame)
-        info = f"{title} | frame {i+1}/{len(clip_np)} | q:quit n:next p:pause"
+        info = f"{title} | frame {i + 1}/{len(clip_np)} | q:quit n:next p:pause"
         bgr = draw_overlay(bgr, info)
         cv2.imshow("shard_viewer", bgr)
         key = cv2.waitKey(t) & 0xFF
@@ -80,7 +80,8 @@ def main(shards_dir: str, index_filename: str, device: str, max_samples: Optiona
         for idx, sample in enumerate(ds):
             has_audio = "audio_mel_frames" in sample
             data: torch.Tensor = sample["data"]
-            label = int(sample["label"]) if not isinstance(sample["label"], torch.Tensor) else int(sample["label"].item())
+            label = int(sample["label"]) if not isinstance(sample["label"], torch.Tensor) else int(
+                sample["label"].item())
             meta = sample.get("metadata", {})
             print(sample)
             title = f"sample {meta.get('id', idx)} | label={label} | frames={meta.get('num_frames', data.shape[0])} | audio={'yes' if has_audio else 'no'}"
@@ -122,5 +123,3 @@ if __name__ == "__main__":
             fps=args.fps,
         )
     )
-
-

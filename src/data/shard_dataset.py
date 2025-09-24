@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import tarfile
@@ -28,11 +27,11 @@ class ShardClipDataset(IterableDataset):
     """
 
     def __init__(
-        self,
-        shards_dir: str,
-        index_filename: str = "index.csv",
-        target_device: str = "cpu",
-        max_samples: Optional[int] = None,
+            self,
+            shards_dir: str,
+            index_filename: str = "index.csv",
+            target_device: str = "cpu",
+            max_samples: Optional[int] = None,
     ):
         super().__init__()
         self.shards_dir = shards_dir
@@ -62,7 +61,7 @@ class ShardClipDataset(IterableDataset):
 
     @staticmethod
     def _load_frames_from_tar(tar: tarfile.TarFile, members: Dict[str, tarfile.TarInfo],
-                             sample_dir: str, num_frames: int, sample_id: str) -> List[np.ndarray]:
+                              sample_dir: str, num_frames: int, sample_id: str) -> List[np.ndarray]:
         """Load frames for a sample from the tar file."""
         frames: List[np.ndarray] = []
         for i in range(num_frames):
@@ -80,7 +79,7 @@ class ShardClipDataset(IterableDataset):
 
     @staticmethod
     def _load_audio_mel_features(tar: tarfile.TarFile, members: Dict[str, tarfile.TarInfo],
-                                sample_dir: str) -> Optional[torch.Tensor]:
+                                 sample_dir: str) -> Optional[torch.Tensor]:
         """Load optional audio mel features from the tar file."""
         mel_frames_shape_member = members.get(f"{sample_dir}/audio_mel_frames.json")
         mel_frames_data_member = members.get(f"{sample_dir}/audio_mel_frames.f16")
@@ -112,7 +111,7 @@ class ShardClipDataset(IterableDataset):
         return shard_to_entries
 
     def _create_sample_dict(self, data: np.ndarray, label: int, meta: Dict[str, Any],
-                           mel_frames_tensor: Optional[torch.Tensor]) -> Dict[str, Any]:
+                            mel_frames_tensor: Optional[torch.Tensor]) -> Dict[str, Any]:
         """Create the final sample dictionary."""
         sample = {
             "data": torch.from_numpy(data).to(self.target_device),
@@ -124,8 +123,8 @@ class ShardClipDataset(IterableDataset):
         return sample
 
     def _process_sample_from_tar(self, tar: tarfile.TarFile, members: Dict[str, tarfile.TarInfo],
-                                sample_id: str, sample_dir: str, num_frames: int,
-                                label: int, meta_json: str) -> Dict[str, Any]:
+                                 sample_id: str, sample_dir: str, num_frames: int,
+                                 label: int, meta_json: str) -> Dict[str, Any]:
         """Process a single sample from the tar file."""
         # Load frames
         frames = self._load_frames_from_tar(tar, members, sample_dir, num_frames, sample_id)
