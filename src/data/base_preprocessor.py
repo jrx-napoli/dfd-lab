@@ -95,9 +95,10 @@ class DataPreprocessor(ABC):
             start_frame: int,
             clip_len: int,
             fps: float,
-            mel_per_second: float
+            mel_per_second: float,
+            overlap_ratio: float = 0.5
     ) -> np.ndarray:
-        """Extract mel spectrograms for each frame in the clip.
+        """Extract mel spectrograms for each frame in the clip with overlap for continuity.
 
         Args:
             audio_mel_full: Full mel spectrogram [n_mels, time_frames]
@@ -105,15 +106,23 @@ class DataPreprocessor(ABC):
             clip_len: Number of frames in the clip
             fps: Frames per second of the video
             mel_per_second: Mel frames per second
+            overlap_ratio: Ratio of overlap between consecutive mel spectrograms (0.0-1.0)
 
         Returns:
-            Frame-level mel spectrograms [clip_len, n_mels, mel_frames_per_frame]
+            Frame-level mel spectrograms [clip_len, n_mels, mel_frames_per_frame_with_overlap]
         """
         n_mels = audio_mel_full.shape[0]
         mel_frames_per_frame = max(1, int(round(mel_per_second / fps)))
+        
+        # Calculate overlap in mel frames
+        overlap_frames = int(round(mel_frames_per_frame * overlap_ratio))
+        overlap_frames = max(0, min(overlap_frames, mel_frames_per_frame - 1))
+        
+        # Calculate the total size including overlap (previous + current + next)
+        mel_frames_per_frame_with_overlap = mel_frames_per_frame + 2 * overlap_frames
 
-        # Initialize output array for frame-level mel spectrograms
-        mel_frames = np.zeros((clip_len, n_mels, mel_frames_per_frame), dtype=np.float16)
+        # Initialize output array for frame-level mel spectrograms with overlap
+        mel_frames = np.zeros((clip_len, n_mels, mel_frames_per_frame_with_overlap), dtype=np.float16)
 
         for i in range(clip_len):
             frame_idx = start_frame + i
@@ -121,23 +130,27 @@ class DataPreprocessor(ABC):
             frame_time = frame_idx / fps
             # Map to mel spectrogram indices
             mel_start = int(np.floor(frame_time * mel_per_second))
-            mel_end = mel_start + mel_frames_per_frame
+            
+            # Add overlap by extending the window backwards and forwards
+            mel_start_with_overlap = mel_start - overlap_frames
+            mel_end_with_overlap = mel_start + mel_frames_per_frame + overlap_frames
 
             # Ensure bounds
-            mel_start = max(0, mel_start)
-            mel_end = min(audio_mel_full.shape[1], mel_end)
+            mel_start_with_overlap = max(0, mel_start_with_overlap)
+            mel_end_with_overlap = min(audio_mel_full.shape[1], mel_end_with_overlap)
 
-            if mel_end > mel_start:
-                # Extract mel spectrogram for this frame
-                mel_frame = audio_mel_full[:, mel_start:mel_end]
+            if mel_end_with_overlap > mel_start_with_overlap:
+                # Extract mel spectrogram for this frame with overlap
+                mel_frame = audio_mel_full[:, mel_start_with_overlap:mel_end_with_overlap]
+                
                 # Pad or truncate to ensure consistent shape
-                if mel_frame.shape[1] < mel_frames_per_frame:
+                if mel_frame.shape[1] < mel_frames_per_frame_with_overlap:
                     # Pad with zeros
-                    pad_width = mel_frames_per_frame - mel_frame.shape[1]
+                    pad_width = mel_frames_per_frame_with_overlap - mel_frame.shape[1]
                     mel_frame = np.pad(mel_frame, ((0, 0), (0, pad_width)), mode='constant', constant_values=0)
-                elif mel_frame.shape[1] > mel_frames_per_frame:
+                elif mel_frame.shape[1] > mel_frames_per_frame_with_overlap:
                     # Truncate
-                    mel_frame = mel_frame[:, :mel_frames_per_frame]
+                    mel_frame = mel_frame[:, :mel_frames_per_frame_with_overlap]
 
                 mel_frames[i] = mel_frame.astype(np.float16)
 
@@ -311,6 +324,9 @@ class DataPreprocessor(ABC):
 
         # If audio present, compute mapping from frame indices to mel frame indices via time
         mel_per_second = sr / hop if hop > 0 else 0.0
+        
+        # Get overlap ratio from audio processing config
+        overlap_ratio = float(audio_cfg.get("mel_overlap_ratio", 0.5))
 
         start = 0
         while start + clip_len <= t:
@@ -324,7 +340,7 @@ class DataPreprocessor(ABC):
             mel_frames: np.ndarray | None = None
             if audio_mel_full is not None and mel_per_second > 0 and fps > 0:
                 mel_frames = self.extract_frame_level_mel(
-                    audio_mel_full, start, clip_len, fps, mel_per_second
+                    audio_mel_full, start, clip_len, fps, mel_per_second, overlap_ratio
                 )
 
             self.shard_writer.add_sample(sample_id, clip, label, meta, mel_frames=mel_frames)
