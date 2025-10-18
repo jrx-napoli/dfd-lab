@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR, ReduceLROnPlateau
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
@@ -84,7 +84,7 @@ class Trainer:
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_config['name']}")
     
-    def _create_scheduler(self) -> Optional[_LRScheduler]:
+    def _create_scheduler(self) -> CosineAnnealingLR | StepLR | ReduceLROnPlateau | None:
         """Create learning rate scheduler based on configuration."""
         scheduler_config = self.config["training"]["scheduler"]
         if scheduler_config["name"] == "cosine":
@@ -120,33 +120,33 @@ class Trainer:
         else:
             raise ValueError(f"Unsupported loss function: {loss_config['name']}")
     
-    def _prepare_batch(self, sample: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _prepare_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Prepare batch data for multi-modal model.
         
         Args:
-            sample: Sample dictionary containing 'data' (video frames), 'audio_mel_frames', and 'label'
+            batch: Batch dictionary containing 'data' (video frames), 'audio_mel_frames', and 'label'
+                  All tensors are already batched: [batch_size, T, H, W, 3], [batch_size, T, n_mels, mel_frames], [batch_size]
             
         Returns:
             Tuple of (image_input, audio_input, labels)
         """
-        # Extract video frames (T, H, W, 3) -> (1, T, 3, H, W)
-        video_frames = sample["data"]  # Already a tensor from ShardClipDataset
-        if video_frames.dim() == 4:  # (T, H, W, 3)
-            video_frames = video_frames.permute(0, 3, 1, 2)  # (T, 3, H, W)
-            video_frames = video_frames.unsqueeze(0)  # (1, T, 3, H, W)
+        # Extract video frames (batch_size, T, H, W, 3) -> (batch_size, T, 3, H, W)
+        video_frames = batch["data"]  # Already a tensor from ShardClipDataset
+        if video_frames.dim() == 5:  # (batch_size, T, H, W, 3)
+            video_frames = video_frames.permute(0, 1, 4, 2, 3)  # (batch_size, T, 3, H, W)
         
         # Normalize video frames to [0, 1]
         video_frames = video_frames.float() / 255.0
         
-        # Extract audio mel spectrogram (T, n_mels, mel_frames) -> (1, T, 1, n_mels, mel_frames)
-        audio_mel = sample["audio_mel_frames"]  # (T, n_mels, mel_frames)
-        if audio_mel.dim() == 3:
-            audio_mel = audio_mel.unsqueeze(0).unsqueeze(2)  # (1, T, 1, n_mels, mel_frames)
+        # Extract audio mel spectrogram (batch_size, T, n_mels, mel_frames) -> (batch_size, T, 1, n_mels, mel_frames)
+        audio_mel = batch["audio_mel_frames"]  # (batch_size, T, n_mels, mel_frames)
+        if audio_mel.dim() == 4:
+            audio_mel = audio_mel.unsqueeze(2)  # (batch_size, T, 1, n_mels, mel_frames)
         
-        # Extract label
-        label = torch.tensor([sample["label"]], dtype=torch.long)
+        # Extract labels (already batched)
+        labels = batch["label"]  # (batch_size,)
         
-        return video_frames.to(self.device), audio_mel.to(self.device), label.to(self.device)
+        return video_frames.to(self.device), audio_mel.to(self.device), labels.to(self.device)
     
     def train_epoch(self) -> Dict[str, float]:
         """Train for one epoch.
@@ -163,14 +163,14 @@ class Trainer:
         num_batches = 0
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch + 1} [Train]")
-        for sample in pbar:
+        for batch in pbar:
             # Prepare batch data
-            image_input, audio_input, target = self._prepare_batch(sample)
+            image_input, audio_input, target = self._prepare_batch(batch)
             
             # Forward pass
             self.optimizer.zero_grad()
             output = self.model(image_input, audio_input)
-            loss = self.criterion(output, target.squeeze())
+            loss = self.criterion(output, target)
             
             # Backward pass
             loss.backward()
@@ -187,14 +187,14 @@ class Trainer:
                 pred = output.argmax(dim=1)
                 
                 all_preds.append(pred.cpu())
-                all_targets.append(target.squeeze().cpu())
+                all_targets.append(target.cpu())
                 all_probs.append(probs.cpu())
                 
                 total_loss += loss.item()
                 num_batches += 1
                 
                 # Update progress bar
-                current_acc = (pred == target.squeeze()).float().mean().item()
+                current_acc = (pred == target).float().mean().item()
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "acc": f"{current_acc:.4f}"
@@ -227,27 +227,27 @@ class Trainer:
         
         with torch.no_grad():
             pbar = tqdm(self.val_loader, desc=f"Epoch {self.current_epoch + 1} [Val]")
-            for sample in pbar:
+            for batch in pbar:
                 # Prepare batch data
-                image_input, audio_input, target = self._prepare_batch(sample)
+                image_input, audio_input, target = self._prepare_batch(batch)
                 
                 # Forward pass
                 output = self.model(image_input, audio_input)
-                loss = self.criterion(output, target.squeeze())
+                loss = self.criterion(output, target)
                 
                 # Collect predictions
                 probs = torch.softmax(output, dim=1)
                 pred = output.argmax(dim=1)
                 
                 all_preds.append(pred.cpu())
-                all_targets.append(target.squeeze().cpu())
+                all_targets.append(target.cpu())
                 all_probs.append(probs.cpu())
                 
                 total_loss += loss.item()
                 num_batches += 1
                 
                 # Update progress bar
-                current_acc = (pred == target.squeeze()).float().mean().item()
+                current_acc = (pred == target).float().mean().item()
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "acc": f"{current_acc:.4f}"
