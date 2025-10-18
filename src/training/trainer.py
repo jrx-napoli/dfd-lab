@@ -48,7 +48,7 @@ class Trainer:
     def _create_optimizer(self) -> Optimizer:
         optimizer_config = self.config["training"]["optimizer"]
         name = optimizer_config["name"]
-        
+
         if name == "adam":
             return torch.optim.Adam(
                 self.model.parameters(),
@@ -62,13 +62,13 @@ class Trainer:
                 momentum=optimizer_config["momentum"],
                 weight_decay=optimizer_config["weight_decay"]
             )
-        
+
         raise ValueError(f"Unsupported optimizer: {name}")
 
     def _create_scheduler(self) -> CosineAnnealingLR | StepLR | ReduceLROnPlateau | None:
         scheduler_config = self.config["training"]["scheduler"]
         name = scheduler_config["name"]
-        
+
         if name == "cosine":
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer,
@@ -89,18 +89,18 @@ class Trainer:
                 patience=5,
                 min_lr=scheduler_config["min_lr"]
             )
-        
+
         return None
 
     def _create_criterion(self) -> nn.Module:
         loss_config = self.config["loss"]
         name = loss_config["name"]
-        
+
         if name == "cross_entropy":
             return nn.CrossEntropyLoss()
         elif name == "focal":
             return FocalLoss(gamma=loss_config["focal_gamma"])
-        
+
         raise ValueError(f"Unsupported loss function: {name}")
 
     def _prepare_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -246,7 +246,7 @@ class Trainer:
     def _update_scheduler(self, val_metrics: Dict[str, float]):
         if self.scheduler is None:
             return
-        
+
         if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             self.scheduler.step(val_metrics[self.config["checkpointing"]["monitor"]])
         else:
@@ -304,7 +304,7 @@ class Trainer:
         current_metric = val_metrics.get(monitor_metric, val_metrics.get("accuracy", 0.0))
 
         is_best = self._is_best_metric(current_metric)
-        
+
         if is_best:
             self._save_best_model(val_metrics, current_metric, monitor_metric)
         else:
@@ -329,8 +329,8 @@ class Trainer:
 
     def _should_save_regular_checkpoint(self) -> bool:
         return (
-            not self.config["checkpointing"]["save_best_only"]
-            and (self.current_epoch + 1) % self.config["logging"]["save_frequency"] == 0
+                not self.config["checkpointing"]["save_best_only"]
+                and (self.current_epoch + 1) % self.config["logging"]["save_frequency"] == 0
         )
 
     def _save_regular_checkpoint(self, val_metrics: Dict[str, float]):
@@ -350,7 +350,7 @@ class Trainer:
             "config": self.config
         }
 
-    def _should_stop_early(self, val_metrics: Dict[str, float]) -> bool:
+    def _should_stop_early(self) -> bool:
         return self.early_stopping_counter >= self.config["training"]["early_stopping"]["patience"]
 
 
