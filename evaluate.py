@@ -26,6 +26,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.data.shard_dataset import ShardClipDataset
 from src.training.lightning_module import DeepfakeTask
 from src.models.base import BaseDetector
+from src.evaluation.method_evaluator import calculate_method_statistics, format_method_statistics
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -120,6 +121,7 @@ def main():
     # Aggregate results
     all_probs = torch.cat([p["probs"] for p in predictions])
     all_targets = torch.cat([p["targets"] for p in predictions])
+    all_metadata = [m for p in predictions for m in p.get("metadata", [])]
     
     # Move to CPU/Numpy
     all_probs = all_probs.cpu().numpy()
@@ -136,7 +138,15 @@ def main():
         metrics["auc_roc"] = roc_auc_score(all_targets, all_probs[:, 1])
     except Exception as e:
         print(f"Warning: Could not calculate AUC-ROC: {e}")
-        metrics["auc_roc"] = 0.0
+        metrics["auc_roc"] = None
+
+    # Calculate per-method statistics (if enabled and metadata available)
+    method_stats = {}
+    if eval_config.get("method_statistics", False) and all_metadata:
+        method_stats = calculate_method_statistics(all_preds, all_targets, all_metadata)
+        metrics["method_statistics"] = method_stats
+    else:
+        metrics["method_statistics"] = {}
 
     # Print Report
     print("\n" + "="*80)
@@ -150,10 +160,18 @@ def main():
     print(f"TN: {cm[0][0]}\tFP: {cm[0][1]}")
     print(f"FN: {cm[1][0]}\tTP: {cm[1][1]}")
     
-    print(f"\nAUC-ROC: {metrics['auc_roc']:.4f}")
+    if metrics["auc_roc"] is not None:
+        print(f"\nAUC-ROC: {metrics['auc_roc']:.4f}")
     
     print(f"Mean Predicted Probability (Class 1): {all_probs[:, 1].mean():.4f}")
     print(f"Min Prob: {all_probs[:, 1].min():.4f}, Max Prob: {all_probs[:, 1].max():.4f}")
+    
+    # Print method statistics
+    if method_stats:
+        print("\n" + "="*60)
+        print("METHOD-LEVEL STATISTICS")
+        print("="*60)
+        print(format_method_statistics(method_stats))
     
     print("="*80 + "\n")
 

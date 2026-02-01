@@ -19,9 +19,10 @@ model:
     # freeze_encoders: true
 
 evaluation:
-  checkpoint_path: "checkpoints/last.ckpt"
+  checkpoint_path: "checkpoints/best-epoch=45-val_loss=0.02.ckpt"
   device: "cuda"  # Options: "cuda", "cpu", "auto"
   limit_batches: null # Set to integer for debugging
+  method_statistics: true  # Enable per-method breakdown (requires 'method' in metadata)
 
   metrics:
     - "accuracy"
