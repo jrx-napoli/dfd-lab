@@ -7,20 +7,17 @@ data:
   frames_per_clip: 32
 
 model:
-  name: "AVClassifier"
-  module_path: "src.models.AVFF"
+  name: "XceptionMaxFusionDetector"
+  module_path: "src.models.xception"
   num_classes: 2
-  model_params:
-    pos_freq: 0.72
-    embed_dim: 256
-    freeze_encoders: false
+  model_params: {}
 
 loss:
   name: "cross_entropy"
 
 evaluation:
-  checkpoint_path: "check_avff_res50/last.ckpt"
-  output_dir: "evaluation_results/avff_res50"
+  checkpoint_path: "checkpoint-res50-finetune/last.ckpt"
+  output_dir: "evaluation_results/xception_res50_finetune_Deepfake_Eval_2024"
   device: "cuda"
   limit_batches: null
   metrics:
