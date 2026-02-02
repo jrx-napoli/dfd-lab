@@ -19,8 +19,8 @@ loss:
   name: "cross_entropy"
 
 evaluation:
-  checkpoint_path: "check_avff/last.ckpt"
-  output_dir: "evaluation_results/avff_base_fakeavceleb"
+  checkpoint_path: "check_avff_2/last.ckpt"
+  output_dir: "evaluation_results/avff_base_fakeavceleb_2"
   device: "cuda"
   limit_batches: null
   metrics:
