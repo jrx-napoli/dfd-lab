@@ -1,27 +1,36 @@
 data:
-  shards_dir: "data/processed/Deepfake_Eval_2024/shards"
+  # Paths to shard datasets
+  shards_dir: "data/processed/FakeAVCeleb_v1.2_jpeg50/shards"
   test_index: "index_val.csv"
+  
+  # Data loading configuration
   batch_size: 8
   num_workers: 1
   pin_memory: true
   frames_per_clip: 32
 
 model:
+  # Model type
   name: "CNNLSTMDetector"
   module_path: "src.models.cnn_lstm"
   num_classes: 2
-  model_params: {}
-
-loss:
-  name: "cross_entropy"
+  model_params:
+    # hidden_size: 512
+    # backbone_video: "resnet18"
+    # backbone_audio: "resnet18"
 
 evaluation:
-  checkpoint_path: "check_cnn_jpeg50/last.ckpt"
-  output_dir: "evaluation_results/cnn_lstm_jpeg50"
-  device: "cuda"
-  limit_batches: null
+  checkpoint_path: "check_cnn_lstm/last.ckpt"
+  device: "cuda"  # Options: "cuda", "cpu", "auto"
+  limit_batches: null # Set to integer for debugging
+
   metrics:
     - "accuracy"
     - "f1_score"
     - "auc_roc"
     - "confusion_matrix"
+  
+  output_dir: "evaluation_results_cnn_jpeg50"
+
+loss:
+  name: "cross_entropy"
