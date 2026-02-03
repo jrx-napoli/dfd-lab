@@ -16,7 +16,7 @@ loss:
   name: "cross_entropy"
 
 evaluation:
-  checkpoint_path: "checkpoint-desync-finetune/last.ckpt"
+  checkpoint_path: "checkpoints-desync-finetune/last.ckpt"
   output_dir: "evaluation_results/xception_desync_finetune_Deepfake_Eval_2024"
   device: "cuda"
   limit_batches: null

@@ -16,8 +16,8 @@ loss:
   name: "cross_entropy"
 
 evaluation:
-  checkpoint_path: "checkpoint-aac96k-finetune/last.ckpt"
-  output_dir: "evaluation_results/xception_aac96k_finetune_FakeAVCeleb"
+  checkpoint_path: "checkpoints-aac-finetune/last.ckpt"
+  output_dir: "evaluation_results/xception_aac_finetune_FakeAVCeleb"
   device: "cuda"
   limit_batches: null
   metrics:
