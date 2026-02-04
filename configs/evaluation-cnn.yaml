@@ -30,3 +30,6 @@ evaluation:
     - "confusion_matrix"
   
   output_dir: "evaluation_results/cnn_lstm_base"
+
+loss:
+  name: "cross_entropy"
