@@ -11,15 +11,15 @@ data:
 
 model:
   # Model type
-  name: "AVClassifier"
-  module_path: "src.models.AVFF"
+  name: "CNNLSTMDetector"
+  module_path: "src.models.cnn_lstm"
   num_classes: 2
   model_params:
-    embed_dim: 256
+    # embed_dim: 256
     # freeze_encoders: true
 
 evaluation:
-  checkpoint_path: "check_avff/last.ckpt"
+  checkpoint_path: "check_cnn_lstm/last.ckpt"
   device: "cuda"  # Options: "cuda", "cpu", "auto"
   limit_batches: null # Set to integer for debugging
 
@@ -29,7 +29,8 @@ evaluation:
     - "auc_roc"
     - "confusion_matrix"
   
-  output_dir: "evaluation_results/avff_base"
+  output_dir: "evaluation_results/cnn_lstm_base_focal"
 
 loss:
-  name: "cross_entropy"
+  name: "focal"
+  focal_gamma: 3.0

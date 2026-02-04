@@ -29,7 +29,8 @@ evaluation:
     - "auc_roc"
     - "confusion_matrix"
   
-  output_dir: "evaluation_results/avff_base"
+  output_dir: "evaluation_results/avff_base_focal"
 
 loss:
-  name: "cross_entropy"
+  name: "focal"
+  focal_gamma: 3.0
