@@ -6,6 +6,7 @@ data:
   pin_memory: true
   frames_per_clip: 32
 
+model:
   name: "AVClassifier"
   module_path: "src.models.AVFF"
   num_classes: 2
